@@ -10,12 +10,12 @@
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .lnm {
       --lnm-caution: #fb923c;
-      --lnm-age: #2dd4bf;
+      --lnm-age: #26b3a1;
     }
   }
   :root[data-theme="dark"] .lnm {
     --lnm-caution: #fb923c;
-    --lnm-age: #2dd4bf;
+    --lnm-age: #26b3a1;
   }
   .lnm-nav {
     margin-bottom: calc(var(--space-5) * -1);
@@ -1382,7 +1382,7 @@
     }
   }
   .lnm-chart--small {
-    min-height: calc(140px + 5.75rem);
+    min-height: calc(160px + 5.75rem);
   }
 
   .lnm-chanline {
@@ -1585,6 +1585,129 @@
     }
     .lnm-outcome__item {
       padding-left: var(--space-3);
+    }
+  }
+
+  /* Round 3: less text, tighter phone cards. */
+  .lnm-lead {
+    margin: 0 0 var(--space-2);
+  }
+  .lnm-mapnote {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-sm);
+  }
+  .lnm-key__swatch {
+    box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  }
+  /* A rate ends on one vertical line; its base fee has a slot of its own after it. */
+  .lnm-fee2 {
+    display: inline-grid;
+    grid-template-columns: auto 3.4em;
+    justify-items: end;
+    column-gap: var(--space-1);
+  }
+  .lnm-fee2__base {
+    justify-self: start;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  .lnm-fee2__in {
+    grid-column: 1 / -1;
+  }
+  .lnm-statecol {
+    width: 1%;
+    white-space: nowrap;
+  }
+  .lnm-card--tight {
+    gap: 2px;
+    padding: var(--space-2) 0;
+  }
+  .lnm-card__line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--space-4);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  .lnm-card__k {
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  .lnm-card--tight .lnm-card__state {
+    gap: 0 var(--space-3);
+  }
+  .lnm-card__toggle {
+    margin-left: auto;
+    width: 28px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-m);
+    background: none;
+    color: var(--color-text-muted);
+    cursor: pointer;
+  }
+  @media (pointer: coarse) {
+    .lnm-card .lnm-card__toggle.tap {
+      display: inline-grid;
+      place-items: center;
+      min-height: 0;
+    }
+  }
+  .lnm-fees__recent {
+    grid-column: 1 / -1;
+  }
+  @media (max-width: 40em) {
+    /* One row of state chips that scrolls sideways, not four rows. */
+    .lnm-chips {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .lnm-chipbtn {
+      flex: none;
+    }
+    /* The node's sections wrap, so the chosen and the focused one are always whole. */
+    .lnm-subnav ul {
+      flex-wrap: wrap;
+      width: auto;
+      overflow: visible;
+    }
+  }
+  /* Very large text (a phone at 200%): the two ends stack, and each policy term is a row of its own
+     over its two values. */
+  @media (max-width: 18.75em) {
+    .lnm-lanes {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "one"
+        "two"
+        "lanes";
+    }
+    .lnm-end--two {
+      text-align: left;
+    }
+    .lnm-end--two .ln-node {
+      align-items: flex-start;
+    }
+    .lnm-policies thead tr,
+    .lnm-policies tbody tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+    .lnm-policies thead th:first-child,
+    .lnm-policies tbody th {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--color-line);
+    }
+    .lnm-policies td {
+      border-top: 0;
+      text-align: left;
+      white-space: normal;
+    }
+    .lnm-policies thead th {
+      text-align: left;
     }
   }
 }

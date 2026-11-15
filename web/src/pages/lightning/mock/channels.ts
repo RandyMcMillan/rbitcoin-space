@@ -1,5 +1,6 @@
 // A channel as the mock channel page reads it, built from the sample nodes: its two ends in BOLT 7's
 // order (the lower key is node one), each end's policy and its last 50 fee changes, and its life.
+import { sorted } from "../../../components/chart/geometry";
 import type { CloseKind } from "../lightning";
 import {
   BREACHED,
@@ -10,6 +11,7 @@ import {
   type Peer,
   type Policy,
   type Rng,
+  type SampleNode,
   recorded,
   rng,
   sampleNodes,
@@ -227,3 +229,36 @@ function fromClosed(self: { id: string; alias: string | null }, c: ClosedChannel
 
 /** The three hand-made samples, for the mockups' links. */
 export const CHANNEL_SAMPLES = [recorded.id, BREACHED, SPLICED] as const;
+
+export interface RecentChange {
+  channel: string;
+  peer: { id: string; alias: string | null };
+  /** "out": the node's own fee on the channel changed; "in": its peer's. */
+  way: "out" | "in";
+  from: number;
+  to: number;
+  time: number;
+}
+
+/** A node's latest fee changes on its largest channels, newest first, from the kept history. */
+export function recentFeeChanges(node: SampleNode, n = 10): RecentChange[] {
+  const out: RecentChange[] = [];
+  for (const c of node.channels.slice(0, 80)) {
+    const ch = sampleChannel(c.id);
+    if (!ch) continue;
+    for (const e of [ch.one, ch.two]) {
+      const last = e.changes.at(-1);
+      const before = e.changes.at(-2);
+      if (!last || !before || last.rate === before.rate) continue;
+      out.push({
+        channel: c.id,
+        peer: { id: c.peer.id, alias: c.peer.alias },
+        way: e.node.id === node.id ? "out" : "in",
+        from: before.rate,
+        to: last.rate,
+        time: last.time,
+      });
+    }
+  }
+  return sorted(out, (a, b) => b.time - a.time).slice(0, n);
+}

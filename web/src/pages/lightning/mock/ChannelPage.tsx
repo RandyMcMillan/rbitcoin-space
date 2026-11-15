@@ -27,6 +27,7 @@ import {
 import { inbound } from "./NodeChannels";
 import {
   Ago,
+  dayCount,
   days,
   ENABLED_MEANS,
   Icon,
@@ -43,6 +44,9 @@ import {
 import { MOCK_NOW, type OpState, type Policy } from "./sample";
 
 const Chart = lazy(() => import("../../../components/chart/Chart"));
+
+/** An axis tick in ppm: whole numbers, and one decimal where a small range needs halves. */
+const tick = (v: number) => (Number.isInteger(v) ? groupDigits(v) : v.toFixed(1));
 
 export default function MockChannelPage() {
   const params = useParams<{ id: string }>();
@@ -88,7 +92,8 @@ function closedWords(c: SampleChannel): string {
 
 function Body(props: { channel: SampleChannel }) {
   const c = () => props.channel;
-  const [h, i, o] = c().id.split("x");
+  // Read from the current channel every time: a link to the successor reuses this component.
+  const colon = () => c().id.replaceAll("x", ":");
   return (
     <>
       <header class="ln-identity lnm-head">
@@ -122,21 +127,23 @@ function Body(props: { channel: SampleChannel }) {
           </span>
           <span class="num">
             {c().closed ? "Lived" : "Open for"}{" "}
-            {groupDigits(days((c().closed?.time ?? MOCK_NOW) - c().funded.time))} days, funded{" "}
+            {dayCount(days((c().closed?.time ?? MOCK_NOW) - c().funded.time))}, funded{" "}
             {formatDay(c().funded.time)}
           </span>
-          <Show when={c().funded.continues}>
-            {(id) => (
-              <span>
-                Continues <MockChannelLink id={id()} /> (inferred splice)
-              </span>
-            )}
-          </Show>
         </p>
+        <Show when={c().funded.continues}>
+          {(id) => (
+            <p class="lnm-chanline">
+              <span>
+                Continues <MockChannelLink id={id()} /> (splice, inferred)
+              </span>
+            </p>
+          )}
+        </Show>
         <dl class="lnm-idforms">
           <IdForm label="Id" value={c().id} />
           <IdForm label="As one number" value={c().scid} />
-          <IdForm label="lnd's form" value={`${h ?? ""}:${i ?? ""}:${o ?? ""}`} />
+          <IdForm label="lnd's form" value={colon()} />
         </dl>
       </header>
       <Show
@@ -197,14 +204,9 @@ function Outcome(props: { channel: SampleChannel }) {
                   </Link>
                 </span>
               </p>
-              <p>
-                {x().kind === "force"
-                  ? "One end broadcast a commitment transaction on its own. The chain does not say which end, or why."
-                  : CLOSE_WORDS[x().kind].why}
-              </p>
               <p class="lnm-outcome__tx">
-                Closing transaction <TxLink txid={x().txid} label="Copy closing transaction ID" />
-                <span class="muted">, closing fee {sats(x().fee)}</span>
+                <TxLink txid={x().txid} label="Copy closing transaction ID" />
+                <span class="muted num">fee {sats(x().fee)}</span>
               </p>
             </div>
             <Show when={c().penalty}>
@@ -219,15 +221,13 @@ function Outcome(props: { channel: SampleChannel }) {
                       </Link>
                     </span>
                   </p>
-                  <p>
-                    An output of that commitment was spent with its revocation key, so the state it
-                    broadcast had been revoked. The sweep took{" "}
-                    <strong class="num">{sats(p().swept)}</strong>{" "}
-                    <span class="muted">(sample figure)</span>. The chain cannot tell which of the
-                    two nodes broadcast the revoked state.
+                  <p class="lnm-outcome__tx">
+                    <span>
+                      Swept <strong class="num">{sats(p().swept)}</strong>{" "}
+                      <span class="muted">(sample)</span>
+                    </span>
                   </p>
                   <p class="lnm-outcome__tx">
-                    Sweeping transaction{" "}
                     <TxLink txid={p().txid} label="Copy sweeping transaction ID" />
                   </p>
                 </div>
@@ -241,19 +241,22 @@ function Outcome(props: { channel: SampleChannel }) {
                       <Icon name="branch" />
                       Continued as <MockChannelLink id={id()} />
                     </span>
-                  </p>
-                  <p>
-                    Observed: its closing transaction also funds channel{" "}
-                    <MockChannelLink id={id()} /> between the same two nodes.
-                  </p>
-                  <p class="muted">
-                    Inferred: a splice, the same channel going on under a new id. A close and a
-                    fresh open in one transaction would look the same on the chain.
+                    <span class="muted">splice, inferred</span>
                   </p>
                 </div>
               )}
             </Show>
           </div>
+          <More label="What the chain shows">
+            <p>
+              A force close is a commitment one end broadcast alone; the chain does not say which
+              end, or why. A penalty sweep spends an output of that commitment with its revocation
+              key, so the broadcast state had been revoked; the chain cannot tell which node
+              broadcast it. "Continued as" means the closing transaction also funds a new channel
+              between the same nodes; that it was a splice is inferred, since a close and a fresh
+              open in one transaction look the same.
+            </p>
+          </More>
         </section>
       )}
     </Show>
@@ -269,13 +272,8 @@ function Lanes(props: { channel: SampleChannel }) {
   const closed = () => c().closed !== null;
   return (
     <section aria-labelledby="lnm-lanes-title">
-      <SectionHeader
-        title={closed() ? "Last advertised policies, before it closed" : "Who charges what"}
-        id="lnm-lanes-title"
-      >
-        {closed()
-          ? "Historical: no longer in force"
-          : "Each end sets the fee for its own direction"}
+      <SectionHeader title={closed() ? "Last policies" : "Who charges what"} id="lnm-lanes-title">
+        {closed() ? "Historical" : "Advertised; balances unknown"}
       </SectionHeader>
       <div class={["lnm-lanes", { "lnm-lanes--closed": closed() }]}>
         <div class="lnm-end lnm-end--one">
@@ -291,17 +289,11 @@ function Lanes(props: { channel: SampleChannel }) {
           <Lane from={c().two} to={c().one} tone={2} closed={closed()} />
         </ol>
       </div>
-      <Show when={!closed()}>
-        <p class="ln-aside">{ENABLED_MEANS}</p>
-      </Show>
-      <More label="Why this matters">
+      <More label="Whose fee is whose">
         <p>
-          A payment pays the fee of the node that forwards it. On this channel{" "}
-          <bdi>{name(c().one.node)}</bdi> sets the price of sending towards{" "}
-          <bdi>{name(c().two.node)}</bdi>, and <bdi>{name(c().two.node)}</bdi> the price of the
-          other way. So the fee a node "charges" on a channel is never what it pays to receive over
-          it. An inbound discount is the exception that goes the other way: an end takes it off for
-          a payment arriving over the channel.
+          Each end sets the fee for forwarding out over the channel: <bdi>{name(c().one.node)}</bdi>{" "}
+          towards <bdi>{name(c().two.node)}</bdi>, and the other way. An inbound discount is taken
+          off for a payment arriving over the channel. {ENABLED_MEANS}
         </p>
       </More>
     </section>
@@ -357,20 +349,16 @@ function Lane(props: { from: ChannelEnd; to: ChannelEnd; tone: 1 | 2; closed: bo
                   fallback={
                     <span class="lnm-tag lnm-tag--caution">
                       <Icon name="pause" />
-                      Disabled: it advertises no forwarding this way
+                      Disabled
                     </span>
                   }
                 >
-                  Time lock {groupDigits(pol().cltv_delta)} blocks; advertised maximum HTLC{" "}
-                  {msatAsSats(pol().max_htlc_msat)}
+                  CLTV {groupDigits(pol().cltv_delta)}, max HTLC {msatAsSats(pol().max_htlc_msat)}
                 </Show>
               </Show>
             </p>
             <Show when={pol().inbound_rate !== 0 || pol().inbound_base_msat !== 0}>
-              <p class="lnm-lane__note">
-                Inbound discount for payments arriving from <bdi>{name(props.to.node)}</bdi>:{" "}
-                {inbound(pol())}
-              </p>
+              <p class="lnm-lane__note">Inbound discount {inbound(pol())}</p>
             </Show>
           </>
         )}
@@ -382,18 +370,14 @@ function Lane(props: { from: ChannelEnd; to: ChannelEnd; tone: 1 | 2; closed: bo
 /** Whole sats, as typed: digits with optional grouping spaces; null with the reason otherwise. */
 export function parseSats(text: string): { sats: number } | { error: string } {
   const t = text.trim();
-  if (t === "") return { error: "Type an amount in whole sats, such as 100 000." };
-  if (/^[-−]/.test(t))
-    return { error: "An amount cannot be negative. Type a whole number of sats." };
+  if (t === "") return { error: "Type an amount in sats." };
+  if (/^[-−]/.test(t)) return { error: "Not negative: whole sats only." };
   const digits = t.replaceAll(/[\s  ,_]/g, "");
-  if (/^\d+[.]\d*$/.test(digits))
-    return { error: "Whole sats only: a forwarding fee is worked out on whole sats here." };
-  if (!/^\d+$/.test(digits))
-    return { error: "That is not an amount. Type a whole number of sats." };
+  if (/^\d+[.]\d*$/.test(digits)) return { error: "Whole sats only." };
+  if (!/^\d+$/.test(digits)) return { error: "Not an amount: whole sats only." };
   const n = Number(digits);
-  if (n === 0) return { error: "Zero sats forwards nothing. Type an amount above zero." };
-  if (n > 2_100_000_000_000_000)
-    return { error: "That is more than all the bitcoin there will be." };
+  if (n === 0) return { error: "Above zero, please." };
+  if (n > 2_100_000_000_000_000) return { error: "More than all bitcoin." };
   return { sats: n };
 }
 
@@ -406,12 +390,9 @@ function Cost(props: { channel: SampleChannel }) {
   ];
   return (
     <section aria-labelledby="lnm-cost-title">
-      <SectionHeader title="Advertised forwarding fee for this hop" id="lnm-cost-title" />
-      <p class="lnm-explain">
-        What each end advertises it would charge to forward an amount across this one channel. It is
-        not a quote for a payment: the channel's balance, and whether a payment would get through,
-        are not known from gossip.
-      </p>
+      <SectionHeader title="Fee for this hop" id="lnm-cost-title">
+        Advertised, not a quote
+      </SectionHeader>
       <div class="lnm-cost">
         <label class="lnm-cost__field">
           <span>Amount, sats</span>
@@ -420,17 +401,13 @@ function Cost(props: { channel: SampleChannel }) {
             type="text"
             inputmode="numeric"
             value={text()}
-            aria-describedby="lnm-cost-formula lnm-cost-error"
+            aria-describedby="lnm-cost-error"
             aria-invalid={"error" in amount() ? "true" : "false"}
             onInput={(e) => setText(e.currentTarget.value)}
           />
         </label>
         <p class="lnm-cost__error" id="lnm-cost-error" role="status">
           {"error" in amount() ? (amount() as { error: string }).error : ""}
-        </p>
-        <p class="lnm-cost__formula" id="lnm-cost-formula">
-          Fee = base fee + amount × fee rate ÷ 1 000 000, worked in millisatoshis and rounded down
-          to a whole one, as nodes do.
         </p>
         <ul class="lnm-cost__ways" aria-live="polite">
           <For each={ways()}>
@@ -445,6 +422,13 @@ function Cost(props: { channel: SampleChannel }) {
           </For>
         </ul>
       </div>
+      <More label="How it is worked out">
+        <p>
+          Fee = base fee + amount × fee rate ÷ 1 000 000, in millisatoshis, rounded down as nodes
+          do. It is what each end advertises for this one channel: the channel's balance, and
+          whether a payment would get through, are not known from gossip.
+        </p>
+      </More>
     </section>
   );
 }
@@ -452,12 +436,15 @@ function Cost(props: { channel: SampleChannel }) {
 function WayFee(props: { policy: Policy | null; amount: { sats: number } | { error: string } }) {
   const ok = () => ("sats" in props.amount ? props.amount.sats : null);
   return (
-    <Show when={ok()} fallback={<span class="muted">No figure until the amount is valid</span>}>
+    <Show when={ok()} fallback={<span class="muted">–</span>}>
       {(n) => (
         <Show
           when={props.policy?.enabled ? props.policy : undefined}
           fallback={
-            <span class="muted">Not forwarded: this end advertises no forwarding this way</span>
+            <span class="lnm-tag lnm-tag--caution">
+              <Icon name="pause" />
+              Disabled
+            </span>
           }
         >
           {(p) => {
@@ -473,12 +460,10 @@ function WayFee(props: { policy: Policy | null; amount: { sats: number } | { err
                     <span class="lnm-tag lnm-tag--caution lnm-cost__limit">
                       <Icon name="warn" />
                       {over()
-                        ? `Over the advertised maximum HTLC of ${msatAsSats(p().max_htlc_msat)}: this end would not forward it as one HTLC.`
-                        : `Under the advertised minimum HTLC of ${msatAsSats(p().min_htlc_msat)}.`}
+                        ? `Over max HTLC (${msatAsSats(p().max_htlc_msat)})`
+                        : `Under min HTLC (${msatAsSats(p().min_htlc_msat)})`}
                     </span>
-                    <span class="lnm-cost__work num">
-                      Its rate would come to {msatAsSats(msat())}, for reference only.
-                    </span>
+                    <span class="lnm-cost__work num">Would be {msatAsSats(msat())}</span>
                   </>
                 }
               >
@@ -486,9 +471,7 @@ function WayFee(props: { policy: Policy | null; amount: { sats: number } | { err
                 <span class="lnm-cost__work num">
                   {msatAsSats(p().base_fee_msat)} + {groupDigits(n())} × {groupDigits(p().fee_rate)}{" "}
                   ÷ 1 000 000
-                  {msat() === exact()
-                    ? ""
-                    : `; rounded down from ${Number(exact().toFixed(3))} msat`}
+                  {msat() === exact() ? "" : ", rounded down"}
                 </span>
               </Show>
             );
@@ -649,16 +632,13 @@ function Life(props: { channel: SampleChannel }) {
           <Show when={c().funded.continues}>
             {(id) => (
               <span>
-                Its funding transaction is the closing transaction of <MockChannelLink id={id()} />,
-                between the same two nodes (inferred splice)
+                From the close of <MockChannelLink id={id()} /> (splice, inferred)
               </span>
             )}
           </Show>
         </Step>
         <Step title="Checked by this server" time={c().verified}>
-          <span>
-            Its funding output found unspent, six blocks deep, paying the two announced keys
-          </span>
+          <span>Funding output found on the chain</span>
         </Step>
         <Step title={`${groupDigits(changes())} fee changes`} time={null}>
           <span>
@@ -674,7 +654,7 @@ function Life(props: { channel: SampleChannel }) {
           fallback={
             <Step title="Open now" time={null} current>
               <span>
-                {groupDigits(days(MOCK_NOW - c().funded.time))} days old;{" "}
+                {dayCount(days(MOCK_NOW - c().funded.time))} old;{" "}
                 {STATE_LABEL[
                   c().state === "closed" ? "inactive" : (c().state as OpState)
                 ].word.toLowerCase()}
@@ -685,40 +665,20 @@ function Life(props: { channel: SampleChannel }) {
           {(x) => (
             <Step title="Closed" time={x().time} last={!c().penalty && !c().continued}>
               <KindTag kind={x().kind} long />
-              <span>
-                Block{" "}
-                <Link class="num" href={paths.block(x().height)}>
-                  {groupDigits(x().height)}
-                </Link>
-                , closing fee <span class="num">{sats(x().fee)}</span>
-              </span>
-              <TxLink txid={x().txid} label="Copy closing transaction ID" />
             </Step>
           )}
         </Show>
         <Show when={c().penalty}>
           {(p) => (
             <Step title="Revoked state swept" time={p().time} last>
-              <KindTag kind="penalty" />
-              <span>
-                Block{" "}
-                <Link class="num" href={paths.block(p().height)}>
-                  {groupDigits(p().height)}
-                </Link>
-                : an output spent with the revocation key,{" "}
-                <span class="num">{sats(p().swept)}</span> <span class="muted">(sample)</span>
-              </span>
-              <TxLink txid={p().txid} label="Copy sweeping transaction ID" />
+              <span class="num">{sats(p().swept)}</span>
             </Step>
           )}
         </Show>
         <Show when={c().continued}>
           {(id) => (
             <Step title="Continued as a new channel" time={c().closed?.time ?? null} last>
-              <span>
-                Its closing transaction also funds <MockChannelLink id={id()} /> between the same
-                two nodes; that this was a splice is inferred
-              </span>
+              <MockChannelLink id={id()} />
             </Step>
           )}
         </Show>
@@ -765,33 +725,25 @@ function FeeHistory(props: { channel: SampleChannel }) {
   return (
     <section aria-labelledby="lnm-feehist-title">
       <SectionHeader title="Fee rate over time" id="lnm-feehist-title">
-        The last {KEPT_CHANGES} changes each way are kept
+        Last {KEPT_CHANGES} changes each way
       </SectionHeader>
-      <p class="lnm-explain">
-        One panel per direction, each on its own scale, over the same time, so a 1 ppm side's
-        changes show beside a 2 499 ppm side's. A step is a policy update gossip carried; "Show the
-        figures" under each lists its changes.
-      </p>
       <div class="lnm-twocharts">
         <For each={[c().one, c().two]}>
           {(e, k) => (
             <div class={`lnm-feepanel lnm-lane--${k() + 1}`}>
               <h3>
-                <bdi>{name(e.node)}</bdi> charges, towards{" "}
+                <bdi>{name(e.node)}</bdi> →{" "}
                 <bdi>{name(k() === 0 ? c().two.node : c().one.node)}</bdi>
               </h3>
-              <Show
-                when={e.changes.length > 0}
-                fallback={<p class="muted">No change kept for this direction.</p>}
-              >
+              <Show when={e.changes.length > 0} fallback={<p class="muted">No change kept</p>}>
                 <div class="ln-chart lnm-chart--small">
                   <Pending>
                     <Chart
                       label={`${name(e.node)}'s fee rate on this channel over time`}
                       x={[...e.changes.map((x) => x.time), end()]}
                       domain={[start(), end()]}
-                      height={140}
-                      left={{ format: groupDigits }}
+                      height={160}
+                      left={{ format: tick }}
                       series={[
                         {
                           name: `${name(e.node)} charges`,

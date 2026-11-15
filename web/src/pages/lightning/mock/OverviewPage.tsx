@@ -13,7 +13,7 @@ import { Link } from "../../../components/Link";
 import { More } from "../../../components/More";
 import { Periods } from "../../../components/Periods";
 import { SectionHeader } from "../../../components/SectionHeader";
-import { formatBtc, groupDigits } from "../../../lib/format";
+import { groupDigits } from "../../../lib/format";
 import { paths } from "../../../lib/network";
 import { usePageTitle } from "../../../lib/page";
 import { btcAxis, msat, ppm, type RankedNode } from "../lightning";
@@ -91,7 +91,6 @@ const href = (id?: string) =>
 
 function Totals(props: { period: Period }) {
   const before = () => BEFORE[props.period.id];
-  const days = () => props.period.days;
   return (
     <section aria-labelledby="lnm-now-title">
       <SectionHeader title="The network now" id="lnm-now-title">
@@ -103,53 +102,32 @@ function Totals(props: { period: Period }) {
       <dl class="ln-stats">
         <Stat
           label="Channels"
-          sub={
-            <Change
-              now={now.channels}
-              then={before().channels}
-              format={groupDigits}
-              days={days()}
-            />
-          }
+          sub={<Change now={now.channels} then={before().channels} format={groupDigits} />}
         >
           <span class="num">{groupDigits(now.channels)}</span>
         </Stat>
         <Stat
           label="Nodes"
-          sub={<Change now={now.nodes} then={before().nodes} format={groupDigits} days={days()} />}
+          sub={<Change now={now.nodes} then={before().nodes} format={groupDigits} />}
         >
           <span class="num">{groupDigits(now.nodes)}</span>
         </Stat>
         <Stat
           label="Capacity"
-          sub={
-            <Change now={now.capacity} then={before().capacity} format={shortBtc} days={days()} />
-          }
+          sub={<Change now={now.capacity} then={before().capacity} format={shortBtc} />}
         >
           <Amount sats={now.capacity} short />
         </Stat>
         <Stat
           label="Median fee rate"
-          sub={
-            <Change
-              now={now.med_fee_rate}
-              then={before().med_fee_rate}
-              format={ppm}
-              days={days()}
-            />
-          }
+          sub={<Change now={now.med_fee_rate} then={before().med_fee_rate} format={ppm} />}
         >
           <span class="num">{ppm(now.med_fee_rate)}</span>
         </Stat>
         <Stat
           label="Median base fee"
           sub={
-            <Change
-              now={now.med_base_fee_msat}
-              then={before().med_base_fee_msat}
-              format={msat}
-              days={days()}
-            />
+            <Change now={now.med_base_fee_msat} then={before().med_base_fee_msat} format={msat} />
           }
         >
           <span class="num">{msat(now.med_base_fee_msat)}</span>
@@ -158,22 +136,21 @@ function Totals(props: { period: Period }) {
       <p class="lnm-opencost">
         <Icon name="swap" />
         <span>
-          Opening a channel now costs about{" "}
+          Opening a channel: about{" "}
           <strong class="num">{groupDigits(Math.ceil(FUNDING_VB * NEXT_BLOCK_RATE))} sats</strong>{" "}
-          on chain, for an assumed funding transaction of {FUNDING_VB} vB (one P2WPKH input, the
-          channel's P2WSH output and change) at the next block's{" "}
-          <FeeRate rate={NEXT_BLOCK_RATE} up />. A cooperative close of that channel, about{" "}
-          {COOP_VB} vB, would be about{" "}
-          <span class="num">{groupDigits(Math.ceil(COOP_VB * NEXT_BLOCK_RATE))} sats</span> at the
-          same rate, for illustration; a force close and the sweeps after it cost more, and vary.
+          on chain now
         </span>
       </p>
-      <p class="ln-aside">Only channels checked against the chain are counted.</p>
+      <p class="ln-aside">Only channels checked against the chain.</p>
       <More>
+        <p>{VERIFIED_NOTE} A change compares the newest snapshot with the one a period before.</p>
         <p>
-          {VERIFIED_NOTE} A change compares the newest snapshot with the one a period before. The
-          cost of an open assumes one ordinary input and change; a batch open shares one transaction
-          between several channels and costs each less.
+          The opening cost assumes a {FUNDING_VB} vB funding transaction (one P2WPKH input, the
+          channel's P2WSH output and change) at the next block's{" "}
+          <FeeRate rate={NEXT_BLOCK_RATE} up />. A cooperative close, about {COOP_VB} vB, would be
+          about {groupDigits(Math.ceil(COOP_VB * NEXT_BLOCK_RATE))} sats at that rate; a force close
+          and its sweeps cost more, and vary. A batch open shares one transaction and costs each
+          channel less.
         </p>
       </More>
     </section>
@@ -213,7 +190,7 @@ function Movers(props: { period: Period }) {
         <span>
           {r.change > 0 ? "+" : "−"}
           {measure() === "capacity"
-            ? formatBtc(Math.abs(r.change)).replace(/\.?0+$/, "")
+            ? (Math.abs(r.change) / 1e8).toFixed(2)
             : groupDigits(Math.abs(r.change))}
         </span>
       ),
@@ -257,7 +234,7 @@ function Movers(props: { period: Period }) {
   return (
     <section aria-labelledby="lnm-movers-title">
       <SectionHeader title="Movers" id="lnm-movers-title">
-        Over {props.period.words}
+        Net change, {props.period.words}
       </SectionHeader>
       <div class="lnm-map-controls">
         <div class="ln-picker" role="group" aria-label="Measure">
@@ -267,10 +244,6 @@ function Movers(props: { period: Period }) {
           {pick(DIRECTIONS, direction(), "moved")}
         </div>
       </div>
-      <p class="lnm-explain">
-        The figure is the net change over the period: what a node has now less what it had at the
-        start, so channels opened and closed within it cancel out.
-      </p>
       <DataTable
         caption={`Nodes by net change in ${measure()}, ${props.period.words}`}
         columns={columns()}
@@ -294,9 +267,6 @@ function Movers(props: { period: Period }) {
           />
         </div>
       </div>
-      <p class="ln-aside">
-        A node leaves when its last public channel closes; it may still run with private channels.
-      </p>
     </section>
   );
 }
@@ -334,7 +304,30 @@ function Closes() {
           <span>{groupDigits(top / 2)}</span>
           <span>0</span>
         </span>
-        <div class="lnm-bars__plot">
+        {/* One tab stop: the arrow keys move between days. */}
+        <div
+          class="lnm-bars__plot"
+          role="toolbar"
+          tabindex="-1"
+          aria-label="Days, oldest first"
+          onKeyDown={(e) => {
+            const step =
+              e.key === "ArrowRight"
+                ? 1
+                : e.key === "ArrowLeft"
+                  ? -1
+                  : e.key === "Home"
+                    ? -99
+                    : e.key === "End"
+                      ? 99
+                      : 0;
+            if (step === 0) return;
+            e.preventDefault();
+            const next = Math.max(0, Math.min(days.length - 1, at() + step));
+            setAt(next);
+            (e.currentTarget.children[next] as HTMLElement | undefined)?.focus();
+          }}
+        >
           <For each={days}>
             {(d, i) => (
               <button
@@ -342,6 +335,7 @@ function Closes() {
                 class={["lnm-bars__day", { "lnm-bars__day--at": at() === i() }]}
                 aria-label={`${formatDay(d.day)}: ${KINDS.map((k) => `${d[k]} ${KIND_LABEL[k].word.toLowerCase()}`).join(", ")}`}
                 aria-pressed={at() === i() ? "true" : "false"}
+                tabindex={at() === i() ? 0 : -1}
                 onPointerEnter={() => setAt(i())}
                 onFocus={() => setAt(i())}
                 onClick={() => setAt(i())}
@@ -370,7 +364,6 @@ function Closes() {
         {KINDS.map(
           (k, i) => `${groupDigits(sums[i] ?? 0)} ${KIND_LABEL[k].word.toLowerCase()}`,
         ).join(", ")}
-        . Penalties are a sliver even when they happen; the figures name each day's.
       </p>
       <details class="chart__figures" onToggle={(e) => setFigures(e.currentTarget.open)}>
         <summary>Show the figures</summary>
@@ -424,7 +417,7 @@ function OverTime(props: { period: Period }) {
                 draw: "line",
                 axis: "right",
                 tone: 2,
-                format: formatBtc,
+                format: (v) => (v / 1e8).toFixed(2),
                 unit: "BTC",
                 marks: true,
               },

@@ -194,21 +194,20 @@ export const STATE_LABEL: Record<
     icon: "pauseDashed",
     tone: "caution",
   },
-  inactive: { word: "No recent policy", short: "No policy", icon: "off", tone: "muted" },
-  // "No recent policy": at least one end has sent none in the last two weeks.
+  inactive: { word: "Policy incomplete", short: "Incomplete", icon: "off", tone: "muted" },
 };
 
 /** Said once, near the first state a page shows. */
 export const ENABLED_MEANS =
-  "Enabled means both ends advertise a forwarding policy for this channel. It is what the nodes say, not proof the channel can route a payment or has the balance to.";
+  "Enabled means both ends advertise enabled forwarding. It is what the nodes say, not proof the channel can route a payment or has the balance to. Policy incomplete means an end's policy is missing, or older than two weeks, after which it no longer counts.";
 
 /** A channel's state as an icon in its status colour and a word. `short` for a phone's column. */
-export function StateTag(props: { state: OpState; short?: boolean }) {
+export function StateTag(props: { state: OpState; short?: boolean; detail?: string | null }) {
   const s = () => STATE_LABEL[props.state];
   return (
     <span class={`lnm-tag lnm-tag--${s().tone}`} title={s().word}>
       <Icon name={s().icon} />
-      {props.short ? s().short : s().word}
+      {props.detail ?? (props.short ? s().short : s().word)}
     </span>
   );
 }
@@ -275,15 +274,29 @@ export function sats(n: number): string {
 
 /** Millisatoshis as sats, to the msat: `1 sat`, `0.5 sat`, `−1 sat`, `20 000 000 sats`. */
 export function msatAsSats(msat: number): string {
-  const s = msat / 1000;
-  const text = Number.isInteger(s)
-    ? groupDigits(Math.abs(s))
-    : Math.abs(s).toFixed(3).replace(/0+$/, "");
-  return `${s < 0 ? "−" : ""}${text} ${Math.abs(s) === 1 ? "sat" : "sats"}`;
+  const sign = msat < 0 ? "−" : "";
+  const m = Math.abs(msat);
+  // Under a sat: in msat, as operators and their software write it.
+  if (m < 1000) return `${sign}${groupDigits(m)} msat`;
+  const whole = Math.floor(m / 1000);
+  const frac =
+    m % 1000 === 0
+      ? ""
+      : `.${String(m % 1000)
+          .padStart(3, "0")
+          .replace(/0+$/, "")}`;
+  return `${sign}${groupDigits(whole)}${frac} ${m === 1000 ? "sat" : "sats"}`;
 }
+
+/** A base fee in a fee column, without its unit (the heading carries it): `1`, `0.5`, `0`. */
+export const baseShort = (msat: number): string =>
+  msat % 1000 === 0 ? groupDigits(msat / 1000) : String(Number((msat / 1000).toFixed(3)));
 
 /** Whole days, the one form a column of ages takes. */
 export const days = (seconds: number): number => Math.max(0, Math.floor(seconds / 86_400));
+
+/** A whole number of days with its word: `1 day`, `1 127 days`. */
+export const dayCount = (n: number): string => `${groupDigits(n)} ${n === 1 ? "day" : "days"}`;
 
 /** Whole hours, the one form a column of update ages takes. */
 export const hours = (seconds: number): number => Math.max(0, Math.floor(seconds / 3600));

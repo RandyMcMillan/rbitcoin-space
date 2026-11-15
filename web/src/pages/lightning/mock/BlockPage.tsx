@@ -116,10 +116,7 @@ export default function MockBlockPage() {
             </tbody>
           </table>
         </div>
-        <p class="ln-aside">
-          Opens are channels funded in this block that this server later checked; closes are funding
-          outputs this block spent. Private channels are not counted.
-        </p>
+        <p class="ln-aside">Public channels only.</p>
       </details>
     </MockFrame>
   );

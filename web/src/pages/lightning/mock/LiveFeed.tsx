@@ -22,7 +22,7 @@ const WORDS: Record<FeedEvent["kind"], { word: string; icon: IconName; tone: str
   force: { word: "Force closed", icon: KIND_LABEL.force.icon, tone: "caution" },
   penalty: { word: "Penalty", icon: KIND_LABEL.penalty.icon, tone: "negative" },
   other: { word: "Closed, other", icon: KIND_LABEL.other.icon, tone: "muted" },
-  splice: { word: "Spliced", icon: "branch", tone: "plain" },
+  splice: { word: "Continued", icon: "branch", tone: "plain" },
 };
 
 export function LiveFeed() {
@@ -92,7 +92,13 @@ export function LiveFeed() {
             aria-hidden="true"
           />
           {paused()
-            ? `Event list paused${held() ? ` at ${formatUtc(pausedAt()).replace(/^.*, /, "")}` : " while you read"}${waiting() > 0 ? `, ${waiting()} new ${waiting() === 1 ? "event" : "events"} waiting` : ""}`
+            ? `List paused${
+                held()
+                  ? ` at ${formatUtc(pausedAt())
+                      .replace(/^.*, /, "")
+                      .replace(/:\d\d UTC$/, " UTC")}`
+                  : ""
+              }${waiting() > 0 ? `, ${waiting()} waiting` : ""}`
             : "Live"}
         </span>
         <button
@@ -126,10 +132,9 @@ export function LiveFeed() {
           <dd class="num">3 of 6 connected</dd>
         </div>
       </dl>
-      <p class="lnm-explain">
-        These figures keep updating while the event list is paused; the list holds still until you
-        resume it.
-      </p>
+      <Show when={paused()}>
+        <p class="ln-aside">Counters stay live while the list is paused.</p>
+      </Show>
       <ol
         class="lnm-feed"
         aria-label="Newest changes first"
@@ -179,10 +184,6 @@ export function LiveFeed() {
           }}
         </For>
       </ol>
-      <p class="ln-aside">
-        A sample loop, not the network. The real feed would show at most one batch a second and keep
-        the newest {KEEP} rows; fee updates are counted, not listed.
-      </p>
     </section>
   );
 }

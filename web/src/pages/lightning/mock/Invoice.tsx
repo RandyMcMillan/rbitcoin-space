@@ -68,7 +68,7 @@ export function InvoiceSearch() {
           />
         </label>
         <button class="btn lnm-quiet" type="button" onClick={() => setText(SAMPLE_INVOICE)}>
-          Paste the specification's example
+          Example invoice
         </button>
       </div>
       <Show when={text().trim() !== ""}>
@@ -77,8 +77,8 @@ export function InvoiceSearch() {
           fallback={
             <p class="ln-aside" role="status">
               {looksLikeInvoice()
-                ? "This mockup reads only the specification's example; the real field would read any invoice, in the browser, without sending it anywhere."
-                : "In this mockup the field reads invoices only; the site's search in the header finds nodes and channels."}
+                ? "Only the example invoice reads in this mockup."
+                : "Not an invoice."}
             </p>
           }
         >
@@ -108,7 +108,7 @@ function Card() {
         <div class="ln-fact">
           <dt>Description</dt>
           <dd>
-            Only its hash: the payer's wallet must hold the text
+            Hashed
             <span class="ln-fact__sub">
               <Hash value={DECODED.descriptionHash} copyLabel="Copy description hash" />
             </span>
@@ -120,13 +120,12 @@ function Card() {
         </div>
         <div class="ln-fact">
           <dt>Expiry</dt>
-          <dd>One hour (the default), so {formatUtc(expires)}</dd>
+          <dd class="num">{formatUtc(expires)}</dd>
         </div>
         <div class="ln-fact">
           <dt>Payee</dt>
           <dd>
             <MockNodeName node={{ id: DECODED.payee, alias: null }} />
-            <span class="ln-fact__sub">Recovered from the signature</span>
           </dd>
         </div>
         <div class="ln-fact">
@@ -145,11 +144,8 @@ function Card() {
           </dd>
         </div>
       </dl>
-      <h3 class="lnm-invoice__hints">Route hints: the last hops to a private node</h3>
-      <p class="ln-aside">
-        These come from the invoice, as its maker wrote them; the public graph does not confirm
-        them, and the page looks nothing up.
-      </p>
+      <h3 class="lnm-invoice__hints">Route hints</h3>
+      <p class="ln-aside">From the invoice; not checked against the graph.</p>
       <ol class="lnm-hints">
         <For each={DECODED.hints}>
           {(h) => (

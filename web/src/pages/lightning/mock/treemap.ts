@@ -57,8 +57,12 @@ export function squarify(values: readonly number[], w: number, h: number): Rect[
   return out;
 }
 
-/** Ppm bands for the fee colourings, one per fee-ramp token, quiet to strong. */
-export const PPM_BANDS = [0, 1, 10, 50, 100, 200, 300, 500, 800, 1_000, 2_000, 5_000] as const;
+/** Ppm bands for the fee colourings, the steps an operator thinks in: 0, under 100, 100 to 499,
+ *  500 to 999, 1 000 to 2 499, 2 500 and up. */
+export const PPM_BANDS = [0, 1, 100, 500, 1_000, 2_500] as const;
+export const PPM_LABELS = ["0", "1–99", "100–499", "500–999", "1 000–2 499", "2 500+"] as const;
+/** The fee-ramp token each band takes: spread across the ramp so neighbours differ. */
+export const PPM_TOKENS = [1, 4, 6, 8, 10, 12] as const;
 
 export const ppmBand = (ppm: number): number => PPM_BANDS.filter((b) => ppm >= b).length - 1;
 

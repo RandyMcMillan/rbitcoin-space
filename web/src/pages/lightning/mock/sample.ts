@@ -145,8 +145,21 @@ export interface SampleNode {
 
 /** What was observed: an end with no policy (none sent, or older than two weeks) is "no recent
  *  policy", whatever the other end says; a policy that says disabled names its end. */
+/** Which end's policy is missing or old, in a few words; null when both are current. */
+export function policyGap(c: { out: Policy | null; in: Policy | null }): string | null {
+  if (!c.in) return "Peer policy missing";
+  if (!c.out) return "Own policy missing";
+  if (isOld(c.in)) return "Peer policy old";
+  if (isOld(c.out)) return "Own policy old";
+  return null;
+}
+
+/** A policy older than two weeks, which LDK no longer counts as current. */
+export const isOld = (p: Policy): boolean => MOCK_NOW - p.last_update > 14 * DAY;
+
+/** "inactive" is shown as "Policy incomplete": an end's policy is missing or older than two weeks. */
 export function stateOf(out: Policy | null, inn: Policy | null): OpState {
-  if (!out || !inn) return "inactive";
+  if (!out || !inn || isOld(out) || isOld(inn)) return "inactive";
   if (!out.enabled) return "here";
   if (!inn.enabled) return "peer";
   return "active";
@@ -253,6 +266,8 @@ function discount(p: Policy | null): Policy | null {
     p.inbound_rate = -discounts.pick([25, 50, 100, 200]);
     p.inbound_base_msat = discounts.pick([0, 0, -1000]);
   }
+  // A few peers went quiet: their last policy is over two weeks old.
+  if (p && discounts.next() < 0.03) p.last_update = MOCK_NOW - discounts.int(15, 40) * DAY;
   return p;
 }
 
@@ -284,7 +299,8 @@ function channel(
     out,
     in: inn,
     state,
-    last_update: Math.max(out?.last_update ?? 0, inn?.last_update ?? 0),
+    // The older of the two known policies: how fresh the pair being compared is.
+    last_update: Math.min(out?.last_update ?? Infinity, inn?.last_update ?? Infinity),
   };
 }
 

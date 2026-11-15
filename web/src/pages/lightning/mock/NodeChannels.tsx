@@ -3,10 +3,12 @@
 // map's grouped cell. 50 a page on a wide screen in two-line rows; 25 a page on a phone as cards.
 // Sort, filters and page live in the address, so a view can be linked.
 import { useSearchParams } from "@solidjs/router";
-import { createEffect, createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { sorted } from "../../../components/chart/geometry";
 import { Link } from "../../../components/Link";
+import { scrollCue } from "../../../components/scrollCue";
+import { More } from "../../../components/More";
 import { Pagination } from "../../../components/Pagination";
 import { Empty } from "../../../components/States";
 import { groupDigits } from "../../../lib/format";
@@ -19,13 +21,21 @@ import {
   hours,
   MockChannelLink,
   mockPaths,
+  baseShort,
   msatAsSats,
   param,
   shortBtc,
   StateTag,
   usePhone,
 } from "./parts";
-import { MOCK_NOW, type OpState, type OpenChannel, type Policy, type SampleNode } from "./sample";
+import {
+  MOCK_NOW,
+  type OpState,
+  type OpenChannel,
+  type Policy,
+  policyGap,
+  type SampleNode,
+} from "./sample";
 
 interface SortKey {
   id: string;
@@ -84,10 +94,10 @@ const SORTS: SortKey[] = [
   },
   {
     id: "update",
-    label: "Last policy update",
+    label: "Older policy update",
     value: (c) => c.last_update,
     first: "desc",
-    card: (c) => `Updated ${groupDigits(hours(MOCK_NOW - c.last_update))} h ago`,
+    card: () => "",
   },
   {
     id: "peer",
@@ -99,7 +109,7 @@ const SORTS: SortKey[] = [
 ];
 const DEFAULT_SORT = SORTS[0] as SortKey;
 /** Sorts whose figure is already on every card. */
-const ON_CARD = new Set(["capacity", "age", "out", "in"]);
+const ON_CARD = new Set(["capacity", "age", "out", "in", "update"]);
 
 const STATES: OpState[] = ["active", "here", "peer", "inactive"];
 
@@ -248,12 +258,7 @@ export function NodeChannels(props: { node: SampleNode }) {
       <h2 id="lnm-channels-title" class="visually-hidden">
         Open channels
       </h2>
-      <p class="lnm-explain">
-        <strong>Fee out</strong>: what <bdi>{name()}</bdi> charges to forward over the channel.{" "}
-        <strong>Fee in</strong>: what the peer charges to forward towards <bdi>{name()}</bdi>.{" "}
-        <strong>Inbound discount</strong> (lnd's inbound fee): what an end takes off for a payment
-        arriving over the channel, shown under the rate when there is one. {ENABLED_MEANS}
-      </p>
+      <p class="ln-aside lnm-lead">Advertised policies; balances unknown.</p>
       <div class="lnm-filters">
         <label class="lnm-filter">
           <span class="visually-hidden">Filter by a peer's name or key, or a channel id</span>
@@ -272,7 +277,7 @@ export function NodeChannels(props: { node: SampleNode }) {
             }
           />
         </label>
-        <div class="lnm-chips" role="group" aria-label="Channel state">
+        <div class="lnm-chips" role="group" aria-label="Channel state" ref={(el) => scrollCue(el)}>
           <button
             class="btn lnm-chipbtn"
             type="button"
@@ -332,15 +337,16 @@ export function NodeChannels(props: { node: SampleNode }) {
               <strong>
                 <Alias alias={p().alias} />
               </strong>
-              <span class="muted">
-                , which has {groupDigits(p().channels)} channels and {shortBtc(p().capacity)} in all
+              <span class="muted num">
+                {" "}
+                ({groupDigits(p().channels)} channels, {shortBtc(p().capacity)})
               </span>
             </span>
             <Link class="tap" href={mockPaths.node(p().id)}>
-              Its node page
+              Its page
             </Link>
             <Link class="tap" href={`${mockPaths.node(props.node.id)}?view=channels`} noscroll>
-              Show every peer
+              All peers
             </Link>
           </p>
         )}
@@ -373,7 +379,7 @@ export function NodeChannels(props: { node: SampleNode }) {
         <Show when={smaller()}>
           {(n) => (
             <span class="lnm-active-filter">
-              Smaller than the {groupDigits(n())} largest, as the map groups them
+              Not on the map (outside the {groupDigits(n())} largest)
               <Link
                 class="lnm-clear"
                 href={`${mockPaths.node(props.node.id)}?view=channels`}
@@ -427,12 +433,12 @@ export function NodeChannels(props: { node: SampleNode }) {
                   )}
                   {header("Capacity", "sats", "capacity", "table__num")}
                   {header("Age", "days", "age", "table__num")}
-                  {header("Fee out", "this node, ppm", "out", "table__num")}
-                  {header("Fee in", "the peer, ppm", "in", "table__num")}
+                  {header("Fee out", "this node, ppm +sats", "out", "table__num")}
+                  {header("Fee in", "the peer, ppm +sats", "in", "table__num")}
                   {header("CLTV Δ", "this node", "cltv", "table__num")}
                   {header("Max HTLC", "this node, sats", "htlc", "table__num")}
-                  {header("State", "of the policies", null, "")}
-                  {header("Updated", "h ago", "update", "table__num")}
+                  {header("State", "policies", null, "lnm-statecol")}
+                  {header("Updated", "older policy, h ago", "update", "table__num")}
                 </tr>
               </thead>
               <tbody>
@@ -487,13 +493,16 @@ export function NodeChannels(props: { node: SampleNode }) {
                           {(p) => (
                             <span class="lnm-row2 lnm-row2--right">
                               <span>{groupDigits(Math.floor(p().max_htlc_msat / 1000))}</span>
-                              <span class="lnm-sub">min {msatAsSats(p().min_htlc_msat)}</span>
+                              {/* The common minimums (1 msat, 1 sat) go unsaid. */}
+                              <Show when={p().min_htlc_msat !== 1 && p().min_htlc_msat !== 1000}>
+                                <span class="lnm-sub">min {msatAsSats(p().min_htlc_msat)}</span>
+                              </Show>
                             </span>
                           )}
                         </Show>
                       </td>
-                      <td>
-                        <StateTag state={c.state} />
+                      <td class="lnm-statecol">
+                        <StateTag state={c.state} detail={policyGap(c)} />
                       </td>
                       <td class="table__num">{groupDigits(hours(MOCK_NOW - c.last_update))}</td>
                     </tr>
@@ -512,11 +521,20 @@ export function NodeChannels(props: { node: SampleNode }) {
           label="Channel pages"
         />
       </Show>
+      <More label="About policies">
+        <p>
+          Fee out is what <bdi>{name()}</bdi> charges to forward over the channel; fee in is what
+          the peer charges to forward towards it. An inbound discount (lnd's inbound fee) is what an
+          end takes off for a payment arriving over the channel. "Updated" is the older of the two
+          policies. {ENABLED_MEANS}
+        </p>
+      </More>
     </section>
   );
 }
 
-/** A policy's rate and base fee on one line; an inbound discount under it when there is one. */
+/** A policy's rate, ending on one line down the column, and its base fee in a slot of its own;
+ *  an inbound discount under them when there is one. */
 function Fee(props: { p: Policy | null }) {
   return (
     <Show
@@ -528,16 +546,11 @@ function Fee(props: { p: Policy | null }) {
       }
     >
       {(p) => (
-        <span class="lnm-row2 lnm-row2--right">
-          <span>
-            {groupDigits(p().fee_rate)}
-            <span class="lnm-sub"> +{msatAsSats(p().base_fee_msat)}</span>
-          </span>
+        <span class="lnm-fee2">
+          <span class="lnm-fee2__rate">{groupDigits(p().fee_rate)}</span>
+          <span class="lnm-fee2__base">+{baseShort(p().base_fee_msat)}</span>
           <Show when={p().inbound_rate !== 0 || p().inbound_base_msat !== 0}>
-            <span
-              class="lnm-sub lnm-inbound"
-              title="Inbound discount: taken off for payments arriving over this channel"
-            >
+            <span class="lnm-sub lnm-inbound lnm-fee2__in" title="Inbound discount">
               inbound {inbound(p())}
             </span>
           </Show>
@@ -553,12 +566,20 @@ export const inbound = (p: Policy): string =>
     p.inbound_base_msat === 0 ? "" : ` ${msatAsSats(p.inbound_base_msat)}`
   }`;
 
-/** A phone's channel: identity, the figures an operator compares, state and age; the rest folded. */
+/** A phone's channel in three short lines: identity; capacity and both fees; state, age and how
+ *  fresh the older policy is. A small button opens the rest under it. */
 function Card(props: { c: OpenChannel; together: number; peerHref: string; extra: string | null }) {
   const c = () => props.c;
-  const rate = (p: Policy | null) => (p ? `${groupDigits(p.fee_rate)} ppm` : "–");
+  const [open, setOpen] = createSignal(false);
+  const fee = (p: Policy | null) =>
+    p ? `${groupDigits(p.fee_rate)} ppm +${baseShort(p.base_fee_msat)}` : "–";
+  const age = () => days(MOCK_NOW - c().opened);
+  const fresh = () =>
+    Number.isFinite(c().last_update)
+      ? `upd ${groupDigits(hours(MOCK_NOW - c().last_update))} h`
+      : "";
   return (
-    <li class="lnm-card">
+    <li class="lnm-card lnm-card--tight">
       <p class="lnm-card__id">
         <Link
           class="ln-node__name tap"
@@ -566,10 +587,10 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
           noscroll
           title="Show only this peer's channels"
         >
-          <Alias alias={c().peer.alias} max={24} />
+          <Alias alias={c().peer.alias} max={22} />
         </Link>
         <Show when={props.together > 1}>
-          <span class="lnm-together">{props.together} channels</span>
+          <span class="lnm-together">×{props.together}</span>
         </Show>
         <span class="lnm-card__chan">
           <Link class="ln-id num tap" href={mockPaths.channel(c().id)}>
@@ -577,37 +598,35 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
           </Link>
         </span>
       </p>
-      <dl class="lnm-card__figs">
-        <div>
-          <dt>Capacity, sats</dt>
-          <dd class="num">{groupDigits(c().capacity)}</dd>
-        </div>
-        <div>
-          <dt>Fee out</dt>
-          <dd class="num">
-            {rate(c().out)}
-            <Show when={c().out}>
-              {(p) => <span class="lnm-sub">+{msatAsSats(p().base_fee_msat)}</span>}
-            </Show>
-          </dd>
-        </div>
-        <div>
-          <dt>Fee in</dt>
-          <dd class="num">
-            {rate(c().in)}
-            <Show when={c().in}>
-              {(p) => <span class="lnm-sub">+{msatAsSats(p().base_fee_msat)}</span>}
-            </Show>
-          </dd>
-        </div>
-      </dl>
-      <p class="lnm-card__state">
-        <StateTag state={c().state} />
-        <span class="num">{groupDigits(days(MOCK_NOW - c().opened))} days old</span>
-        <Show when={props.extra}>{(x) => <strong class="num">{x()}</strong>}</Show>
+      <p class="lnm-card__line num">
+        <span>
+          {groupDigits(c().capacity)} <span class="lnm-card__k">sats</span>
+        </span>
+        <span>
+          <span class="lnm-card__k">out</span> {fee(c().out)}
+        </span>
+        <span>
+          <span class="lnm-card__k">in</span> {fee(c().in)}
+        </span>
       </p>
-      <details class="lnm-card__more">
-        <summary class="tap">More about this channel</summary>
+      <p class="lnm-card__state">
+        <StateTag state={c().state} short detail={policyGap(c())} />
+        <span class="num">
+          {groupDigits(age())} {age() === 1 ? "day" : "days"}
+        </span>
+        <span class="num muted">{fresh()}</span>
+        <Show when={props.extra}>{(x) => <strong class="num">{x()}</strong>}</Show>
+        <button
+          type="button"
+          class="lnm-card__toggle tap"
+          aria-expanded={open() ? "true" : "false"}
+          aria-label={`More about ${c().id}`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span aria-hidden="true">{open() ? "▴" : "▾"}</span>
+        </button>
+      </p>
+      <Show when={open()}>
         <dl class="lnm-card__list">
           <div>
             <dt>CLTV delta</dt>
@@ -617,32 +636,34 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
             </dd>
           </div>
           <div>
-            <dt>HTLC limits, this node</dt>
+            <dt>HTLC, this node</dt>
             <dd class="num">
               {c().out
                 ? `${msatAsSats(c().out?.min_htlc_msat ?? 0)} to ${msatAsSats(c().out?.max_htlc_msat ?? 0)}`
                 : "–"}
             </dd>
           </div>
-          <Show
-            when={
-              c().out && (c().out?.inbound_rate ?? 0) !== 0
-                ? c().out
-                : c().in && (c().in?.inbound_rate ?? 0) !== 0
-                  ? c().in
-                  : null
-            }
-          >
-            {(p) => (
-              <div>
-                <dt>Inbound discount, {p() === c().out ? "this node" : "the peer"}</dt>
-                <dd class="num">{inbound(p())}</dd>
-              </div>
+          <For each={[c().out, c().in]}>
+            {(p, k) => (
+              <Show when={p && (p.inbound_rate !== 0 || p.inbound_base_msat !== 0) ? p : null}>
+                {(q) => (
+                  <div>
+                    <dt>Inbound discount, {k() === 0 ? "this node" : "the peer"}</dt>
+                    <dd class="num">{inbound(q())}</dd>
+                  </div>
+                )}
+              </Show>
             )}
-          </Show>
+          </For>
           <div>
             <dt>Policies updated</dt>
-            <dd class="num">{groupDigits(hours(MOCK_NOW - c().last_update))} h ago</dd>
+            <dd class="num">
+              this node{" "}
+              {c().out ? `${groupDigits(hours(MOCK_NOW - (c().out?.last_update ?? 0)))} h` : "none"}
+              , the peer{" "}
+              {c().in ? `${groupDigits(hours(MOCK_NOW - (c().in?.last_update ?? 0)))} h` : "none"}{" "}
+              ago
+            </dd>
           </div>
           <div>
             <dt>The peer</dt>
@@ -654,12 +675,12 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
             <div>
               <dt>Funded</dt>
               <dd>
-                in one transaction with {c().batch} other {c().batch === 1 ? "channel" : "channels"}
+                with {c().batch} other {c().batch === 1 ? "channel" : "channels"}
               </dd>
             </div>
           </Show>
         </dl>
-      </details>
+      </Show>
     </li>
   );
 }

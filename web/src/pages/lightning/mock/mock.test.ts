@@ -15,9 +15,12 @@ describe("the mockups' pure parts", () => {
     expect(parseSats("")).toHaveProperty("error");
   });
 
-  it("writes millisatoshis as sats, singular for one", () => {
+  it("writes millisatoshis as sats, and amounts under a sat in msat", () => {
     expect(msatAsSats(1000)).toBe("1 sat");
-    expect(msatAsSats(500)).toBe("0.5 sats");
+    expect(msatAsSats(500)).toBe("500 msat");
+    expect(msatAsSats(1)).toBe("1 msat");
+    expect(msatAsSats(1_000_000_999)).toBe("1\u202F000\u202F000.999 sats");
+    expect(msatAsSats(1100)).toBe("1.1 sats");
     expect(msatAsSats(-1000)).toBe("−1 sat");
     expect(msatAsSats(20_000_000_000)).toBe("20 000 000 sats");
   });

@@ -8,6 +8,7 @@ import { formatDay } from "../../../components/chart/scale";
 import { CopyButton } from "../../../components/CopyButton";
 import { HashFull } from "../../../components/Hash";
 import { Link } from "../../../components/Link";
+import { More } from "../../../components/More";
 import { scrollCue } from "../../../components/scrollCue";
 import { Empty } from "../../../components/States";
 import { SectionHeader } from "../../../components/SectionHeader";
@@ -160,7 +161,7 @@ function Identity(props: { node: SampleNode }) {
           <span class="muted">{ordinal(props.node.rank.channels)} by channels</span>
         </span>
         <span class="muted">
-          Channel policies updated as recently as <Ago time={newest()} />
+          Policies updated <Ago time={newest()} />
         </span>
       </p>
     </header>
@@ -175,15 +176,14 @@ function About(props: { node: SampleNode }) {
       : `${props.node.id}@${cut(cleanAlias(props.node.socket) ?? "", 128).text}`;
   return (
     <section aria-labelledby="lnm-about-title">
-      <SectionHeader title="Who it is and what it announces" id="lnm-about-title">
-        Its own announcement, updated <Ago time={props.node.last_update} />
+      <SectionHeader title="Identity" id="lnm-about-title">
+        Announced <Ago time={props.node.last_update} />
       </SectionHeader>
       <dl class="ln-facts lnm-about">
         <div class="ln-fact">
           <dt>Public key</dt>
           <dd>
             <HashFull value={props.node.id} copyLabel="Copy public key" />
-            <span class="ln-fact__sub">Its identity: any node can announce any name.</span>
           </dd>
         </div>
         <div class="ln-fact">
@@ -227,28 +227,25 @@ function About(props: { node: SampleNode }) {
           </dd>
         </div>
         <div class="ln-fact">
-          <dt>Announced colour, the node's own choice</dt>
+          <dt>Announced colour</dt>
           <dd>
             <ColourChip color={props.node.color} />
           </dd>
         </div>
       </dl>
-      <p class="ln-aside">
-        A node re-announces itself only when something about it changes, so an old announcement is
-        normal for a node that runs quietly; its channels' policies say more about whether it is
-        working.
-      </p>
+      <More label="About names and announcements">
+        <p>
+          The public key is the node's identity: any node can announce any name. A node re-announces
+          only when something about it changes, so an old announcement is normal for a quiet node;
+          its channels' policies say more about whether it is working.
+        </p>
+      </More>
     </section>
   );
 }
 
 /** "Up 7.1 BTC (2.6%)", "Down 3", "No change": an arrow and a word, never a colour. */
-export function Change(props: {
-  now: number;
-  then: number;
-  format: (n: number) => string;
-  days?: number;
-}) {
+export function Change(props: { now: number; then: number; format: (n: number) => string }) {
   const d = () => props.now - props.then;
   const share = () => (props.then === 0 ? null : (d() / props.then) * 100);
   const text = () => {
@@ -257,11 +254,8 @@ export function Change(props: {
     const pct = s === null ? "" : ` (${Math.abs(s) < 0.1 ? "<0.1" : Math.abs(s).toFixed(1)}%)`;
     return `${d() > 0 ? "↑ Up" : "↓ Down"} ${props.format(Math.abs(d()))}${pct}`;
   };
-  return (
-    <>
-      {text()} in {props.days === 1 ? "1 day" : `${props.days ?? 7} days`}
-    </>
-  );
+  // The period is in the section's heading or its period control, not repeated per figure.
+  return <>{text()}</>;
 }
 
 function Glance(props: { node: SampleNode }) {
@@ -300,7 +294,7 @@ function Glance(props: { node: SampleNode }) {
   return (
     <section aria-labelledby="lnm-glance-title">
       <SectionHeader title="At a glance" id="lnm-glance-title">
-        Changes over 7 days, from this server's record
+        Changes over 7 days
       </SectionHeader>
       <dl class="ln-stats lnm-glance">
         <Stat
@@ -315,8 +309,7 @@ function Glance(props: { node: SampleNode }) {
           label="Open channels"
           sub={
             <>
-              {groupDigits(active())} enabled both ways, {groupDigits(chans().length - active())}{" "}
-              not
+              {groupDigits(active())} enabled
               <br />
               <Change
                 now={chans().length}
@@ -352,7 +345,7 @@ function Glance(props: { node: SampleNode }) {
         <Stat
           label="Closes seen"
           sub={
-            <Show when={forced() !== null} fallback="None since this server started">
+            <Show when={forced() !== null} fallback="None seen">
               {forced()}% forced
               <span class="lnm-kinds">
                 <For each={["cooperative", "force", "penalty", "other"] as const}>
@@ -371,7 +364,7 @@ function Glance(props: { node: SampleNode }) {
         >
           <span class="num">{groupDigits(props.node.closed.length)}</span>
         </Stat>
-        <Stat label="First seen" sub="Its oldest funding block this server holds">
+        <Stat label="First seen">
           <span class="num">{formatDay(props.node.first_seen)}</span>
         </Stat>
       </dl>

@@ -2,8 +2,10 @@
 // channels in that row) and its past, as two small charts on fitted axes.
 import { useNavigate, useSearchParams } from "@solidjs/router";
 import { createEffect, createMemo, For, lazy, Loading as Pending, onSettled, Show } from "solid-js";
+import { sorted } from "../../../components/chart/geometry";
 import { Link } from "../../../components/Link";
 import { Pagination } from "../../../components/Pagination";
+import { type Column, DataTable } from "../../../components/DataTable";
 import { formatDay, formatMoment } from "../../../components/chart/scale";
 import "../../../components/chart/Chart.css";
 import { More } from "../../../components/More";
@@ -12,14 +14,16 @@ import { Empty } from "../../../components/States";
 import { formatBtc, groupDigits } from "../../../lib/format";
 import { onNetwork } from "../../../lib/network";
 import { useNetwork } from "../../../lib/page";
-import { btcAxis, type CloseKind, feeSentence, type FeeRow } from "../lightning";
+import { btcAxis, cleanAlias, type CloseKind, type FeeRow } from "../lightning";
 import { Alias } from "../parts";
 import { type FeeSummary, feeRowsOf, summary, type Way } from "./fees";
 import {
+  Ago,
   days,
   Icon,
   KindTag,
   MockChannelLink,
+  MockNodeName,
   mockPaths,
   param,
   sats,
@@ -27,12 +31,20 @@ import {
   TxLink,
   usePhone,
 } from "./parts";
-import { MOCK_NOW, type SampleNode } from "./sample";
+import { type RecentChange, recentFeeChanges } from "./channels";
+import { type ClosedChannel, MOCK_NOW, type SampleNode } from "./sample";
 
 const Chart = lazy(() => import("../../../components/chart/Chart"));
 const DAY = 86_400;
 
 const KINDS: CloseKind[] = ["cooperative", "force", "penalty", "other"];
+
+const CLOSED_SORTS = [
+  { id: "closed", value: (c: ClosedChannel) => c.closedHeight },
+  { id: "capacity", value: (c: ClosedChannel) => c.capacity },
+  { id: "fee", value: (c: ClosedChannel) => c.fee },
+  { id: "lived", value: (c: ClosedChannel) => c.closedTime - c.opened },
+];
 
 export function NodeClosed(props: { node: SampleNode }) {
   const [search, setSearch] = useSearchParams();
@@ -42,14 +54,45 @@ export function NodeClosed(props: { node: SampleNode }) {
   const spliced = () => param(search["kind"]) === "continued";
   const peer = () => param(search["peer"]) ?? null;
   const page = () => Math.max(1, Number.parseInt(param(search["page"]) ?? "1", 10) || 1);
+  const query = () => (param(search["q"]) ?? "").trim().toLowerCase();
+  const sortBy = () => CLOSED_SORTS.find((x) => x.id === param(search["sort"])) ?? CLOSED_SORTS[0];
+  const dir = () => (param(search["dir"]) === "asc" ? 1 : -1);
   const matching = createMemo(() =>
-    props.node.closed.filter(
-      (c) =>
-        (kind() === null || c.kind === kind()) &&
-        (!spliced() || c.continued !== null) &&
-        (peer() === null || c.peer.id === peer()),
+    sorted(
+      props.node.closed.filter(
+        (c) =>
+          (kind() === null || c.kind === kind()) &&
+          (!spliced() || c.continued !== null) &&
+          (peer() === null || c.peer.id === peer()) &&
+          (query() === "" ||
+            c.id.includes(query()) ||
+            (cleanAlias(c.peer.alias) ?? "").toLowerCase().includes(query()) ||
+            c.peer.id.startsWith(query())),
+      ),
+      (a, b) => ((sortBy()?.value(a) ?? 0) - (sortBy()?.value(b) ?? 0)) * dir(),
     ),
   );
+  const setSort = (id: string) => {
+    const same = sortBy()?.id === id;
+    setSearch({ sort: id, dir: same && dir() === -1 ? "asc" : "desc", page: undefined });
+  };
+  const th = (label: string, id: string) => {
+    const on = () => sortBy()?.id === id;
+    return (
+      <th
+        scope="col"
+        class="table__num"
+        aria-sort={on() ? (dir() === 1 ? "ascending" : "descending") : undefined}
+      >
+        <button class="lnm-sort" type="button" onClick={() => setSort(id)}>
+          {label}
+          <span class="lnm-sort__arrow" aria-hidden="true">
+            {on() ? (dir() === 1 ? "↑" : "↓") : "↕"}
+          </span>
+        </button>
+      </th>
+    );
+  };
   const pages = () => Math.max(1, Math.ceil(matching().length / perPage()));
   const current = () => Math.min(page(), pages());
   const shown = () => matching().slice((current() - 1) * perPage(), current() * perPage());
@@ -70,7 +113,7 @@ export function NodeClosed(props: { node: SampleNode }) {
   return (
     <section aria-labelledby="lnm-closed-title">
       <SectionHeader title="Closed channels" id="lnm-closed-title">
-        Seen on the chain since this server started, newest first
+        Seen by this server
       </SectionHeader>
       <Show
         when={props.node.closed.length > 0}
@@ -80,6 +123,25 @@ export function NodeClosed(props: { node: SampleNode }) {
           </Empty>
         }
       >
+        <div class="lnm-filters">
+          <label class="lnm-filter">
+            <span class="visually-hidden">Filter by a peer's name or key, or a channel id</span>
+            <input
+              type="search"
+              class="lnm-input"
+              placeholder="Peer or channel id"
+              value={param(search["q"]) ?? ""}
+              spellcheck="false"
+              autocomplete="off"
+              onInput={(e) =>
+                setSearch(
+                  { q: e.currentTarget.value || undefined, page: undefined },
+                  { replace: true },
+                )
+              }
+            />
+          </label>
+        </div>
         <div class="lnm-chips" role="group" aria-label="Kind of close">
           <button
             class="btn lnm-chipbtn"
@@ -113,7 +175,7 @@ export function NodeClosed(props: { node: SampleNode }) {
             >
               <span class="lnm-tag lnm-tag--muted">
                 <Icon name="branch" />
-                Continued as a new channel
+                Continued
               </span>
               <span class="num muted">{groupDigits(continued())}</span>
             </button>
@@ -123,7 +185,7 @@ export function NodeClosed(props: { node: SampleNode }) {
           {(p) => (
             <p class="lnm-peerbar">
               <span>
-                Closes with{" "}
+                With{" "}
                 <strong>
                   <Alias alias={p().alias} />
                 </strong>
@@ -160,32 +222,34 @@ export function NodeClosed(props: { node: SampleNode }) {
                         </Link>
                       </span>
                     </p>
+                    <p class="lnm-card__line num">
+                      <span>{groupDigits(c.capacity)}</span>
+                      <span>
+                        lived {groupDigits(days(c.closedTime - c.opened))}{" "}
+                        {days(c.closedTime - c.opened) === 1 ? "day" : "days"}
+                      </span>
+                    </p>
                     <p class="lnm-card__state">
                       <KindTag kind={c.kind} />
                       <span class="num">{formatDay(c.closedTime)}</span>
-                      <span class="num muted">block {groupDigits(c.closedHeight)}</span>
                     </p>
                     <Show when={c.continued}>
                       {(n) => (
                         <p class="lnm-card__state lnm-continued">
-                          Continued as <MockChannelLink id={n()} /> (inferred splice)
+                          Continued as <MockChannelLink id={n()} />
                         </p>
                       )}
                     </Show>
                     <details class="lnm-card__more">
-                      <summary class="tap">More about this close</summary>
+                      <summary class="tap">More</summary>
                       <dl class="lnm-card__list">
                         <div>
-                          <dt>Capacity</dt>
-                          <dd class="num">{sats(c.capacity)}</dd>
+                          <dt>Block</dt>
+                          <dd class="num">{groupDigits(c.closedHeight)}</dd>
                         </div>
                         <div>
                           <dt>Closing fee</dt>
                           <dd class="num">{sats(c.fee)}</dd>
-                        </div>
-                        <div>
-                          <dt>Lived</dt>
-                          <dd class="num">{groupDigits(days(c.closedTime - c.opened))} days</dd>
                         </div>
                         <div>
                           <dt>Closing transaction</dt>
@@ -208,19 +272,11 @@ export function NodeClosed(props: { node: SampleNode }) {
                 <tr>
                   <th scope="col">Peer and channel</th>
                   <th scope="col">What happened</th>
-                  <th scope="col" class="table__num">
-                    Capacity, sats
-                  </th>
-                  <th scope="col" class="table__num">
-                    Closing fee, sats
-                  </th>
-                  <th scope="col" class="table__num">
-                    Lived, days
-                  </th>
+                  {th("Capacity, sats", "capacity")}
+                  {th("Closing fee, sats", "fee")}
+                  {th("Lived, days", "lived")}
                   <th scope="col">Closing transaction</th>
-                  <th scope="col" class="table__num">
-                    Closed
-                  </th>
+                  {th("Closed", "closed")}
                 </tr>
               </thead>
               <tbody>
@@ -246,7 +302,7 @@ export function NodeClosed(props: { node: SampleNode }) {
                           <Show when={c.continued}>
                             {(n) => (
                               <span class="lnm-continued">
-                                Continued as <MockChannelLink id={n()} /> (inferred)
+                                Continued as <MockChannelLink id={n()} />
                               </span>
                             )}
                           </Show>
@@ -280,20 +336,33 @@ export function NodeClosed(props: { node: SampleNode }) {
           />
         </Show>
       </Show>
-      <More label="How a close is told apart">
+      <More label="How closes are told apart">
         <p>
-          The closing transaction says how a channel ended. A force close is a commitment
-          transaction one end broadcast alone; a penalty is a force close of an old, revoked state
-          whose outputs the other end swept with the revocation key. A cooperative close spends the
-          channel alone and is not a commitment. "Continued as" is an observation: the closing
-          transaction also funds a new channel between the same two nodes. That it was a splice is
-          an inference; a close and a fresh open in one transaction look the same. "Other" spends
-          more than the channel, most likely a splice that added funds.
+          A force close is a commitment one end broadcast alone; a penalty is one whose revoked
+          state was swept with the revocation key. A cooperative close spends the channel alone.
+          "Continued as" means the closing transaction also funds a new channel between the same
+          nodes: most likely a splice, though a close and a fresh open in one transaction look the
+          same. "Other" spends more than the channel, most likely a splice that added funds.
         </p>
       </More>
     </section>
   );
 }
+
+const RECENT_COLUMNS: Column<RecentChange>[] = [
+  {
+    header: "Peer",
+    cell: (r) => (
+      <span class="lnm-row2">
+        <MockNodeName node={r.peer} />
+      </span>
+    ),
+  },
+  { header: "Whose", cell: (r) => (r.way === "out" ? "This node" : "The peer") },
+  { header: "From", numeric: true, cell: (r) => groupDigits(r.from) },
+  { header: "To", numeric: true, cell: (r) => groupDigits(r.to) },
+  { header: "When", numeric: true, optional: true, cell: (r) => <Ago time={r.time} /> },
+];
 
 const figure = (s: FeeSummary | null, get: (s: FeeSummary) => number) =>
   s === null ? "–" : groupDigits(get(s));
@@ -320,8 +389,8 @@ export function NodeFees(props: { node: SampleNode }) {
   return (
     <div class="lnm-fees">
       <section aria-labelledby="lnm-fees-sum-title">
-        <SectionHeader title="Its fees in figures" id="lnm-fees-sum-title">
-          Over its open channels, in ppm
+        <SectionHeader title="In figures" id="lnm-fees-sum-title">
+          ppm
         </SectionHeader>
         <div class="table-scroll">
           <table class="table lnm-table lnm-feesum">
@@ -359,19 +428,18 @@ export function NodeFees(props: { node: SampleNode }) {
         </div>
         <Show when={out() && inn()}>
           <p class="lnm-ratio">
-            It charges{" "}
+            Charges{" "}
             <strong class="num">
               {((out()?.median ?? 0) / Math.max(1, inn()?.median ?? 1)).toFixed(1)}×
             </strong>{" "}
-            what its peers charge towards it, median against median.
+            its peers, by median
           </p>
         </Show>
       </section>
       <section aria-labelledby="lnm-fees-title">
         <SectionHeader title="Fee rates" id="lnm-fees-title">
-          Choose a bar to list those channels
+          Channels by rate, ppm
         </SectionHeader>
-        <p class="ln-fees__answer">{feeSentence(rows())}</p>
         <figure class="ln-fees">
           <div class="ln-fees__plot">
             <span class="ln-fees__unit">ppm</span>
@@ -411,14 +479,23 @@ export function NodeFees(props: { node: SampleNode }) {
         </figure>
         <More>
           <p>
-            A channel has a fee rate each way: what this node charges to forward a payment out over
-            it, and what the peer at the other end charges to send one towards it. A rate is in
-            parts per million of the amount forwarded: 1 000 ppm is 0.1%. The average by capacity
-            counts a 5 BTC channel fifty times as much as a 0.1 BTC one, which is closer to where
-            payments go; it leaves out rates over 1 000 000 ppm, which refuse to route. The base fee
-            per payment is not in these figures; the channel list shows it.
+            "It charges" is this node's rate out over each channel; "its peers charge" is theirs
+            towards it. 1 000 ppm is 0.1% of the amount. The average by capacity leaves out rates
+            over 1 000 000 ppm, which refuse to route; base fees are in the channel list. A bar
+            lists its channels.
           </p>
         </More>
+      </section>
+      <section aria-labelledby="lnm-recent-title" class="lnm-fees__recent">
+        <SectionHeader title="Recent fee changes" id="lnm-recent-title">
+          ppm
+        </SectionHeader>
+        <DataTable
+          caption="The latest fee changes on its channels, newest first"
+          columns={RECENT_COLUMNS}
+          rows={recentFeeChanges(props.node)}
+          empty={<Empty title="No change kept" />}
+        />
       </section>
     </div>
   );
@@ -432,25 +509,20 @@ export function NodeHistory(props: { node: SampleNode }) {
   const x = () => points().map((p) => p.time);
   const time = (t: number) => (t % DAY === 0 ? formatDay(t) : formatMoment(t));
   const change = (now: number, then: number, f: (n: number) => string) =>
-    now === then ? "no change in" : `${now > then ? "up" : "down"} ${f(Math.abs(now - then))}`;
+    now === then ? "No change" : `${now > then ? "↑ Up" : "↓ Down"} ${f(Math.abs(now - then))}`;
   return (
     <section aria-labelledby="lnm-history-title" class="lnm-neutral-charts">
       <SectionHeader title="Over time" id="lnm-history-title">
-        Each change and midnight UTC
+        Since {formatDay(first()?.time ?? MOCK_NOW)}
       </SectionHeader>
       <Show when={first() && last()}>
-        <p class="lnm-history__words">
-          Since {formatDay(first()?.time ?? 0)}:{" "}
-          <strong>
-            {change(
-              last()?.channels ?? 0,
-              first()?.channels ?? 0,
-              (n) => `${groupDigits(n)} channels`,
-            )}
-          </strong>{" "}
-          and <strong>{change(last()?.capacity ?? 0, first()?.capacity ?? 0, shortBtc)}</strong>, to{" "}
-          {groupDigits(last()?.channels ?? 0)} channels and {shortBtc(last()?.capacity ?? 0)}. The
-          axes fit the range, so small changes show; neither starts at zero.
+        <p class="lnm-history__words num">
+          {change(
+            last()?.channels ?? 0,
+            first()?.channels ?? 0,
+            (n) => `${groupDigits(n)} channels`,
+          )}
+          , {change(last()?.capacity ?? 0, first()?.capacity ?? 0, shortBtc)}
         </p>
       </Show>
       <div class="lnm-twocharts">
@@ -460,7 +532,7 @@ export function NodeHistory(props: { node: SampleNode }) {
               label="This node's open channels, since this server's record began"
               x={x()}
               gap={DAY}
-              height={140}
+              height={160}
               left={{ format: groupDigits }}
               series={[
                 {
@@ -480,14 +552,14 @@ export function NodeHistory(props: { node: SampleNode }) {
               label="This node's capacity, since this server's record began"
               x={x()}
               gap={DAY}
-              height={140}
+              height={160}
               left={{ format: btcAxis }}
               series={[
                 {
                   name: "Capacity",
                   values: points().map((p) => p.capacity),
                   draw: "step",
-                  format: formatBtc,
+                  format: (v) => (v / 1e8).toFixed(2),
                   unit: "BTC",
                 },
               ]}
@@ -496,7 +568,12 @@ export function NodeHistory(props: { node: SampleNode }) {
           </Pending>
         </div>
       </div>
-      <p class="ln-coverage">Recorded since {formatMoment(first()?.time ?? MOCK_NOW)}.</p>
+      <More label="About this history">
+        <p>
+          A point at each change and each midnight UTC, from this server's record. The axes fit the
+          range, so neither starts at zero.
+        </p>
+      </More>
     </section>
   );
 }

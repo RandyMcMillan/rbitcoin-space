@@ -277,6 +277,10 @@
     .nav a {
       font-size: var(--text-xs);
     }
+    /* Two to a row, so a large text size never cuts a section's name. */
+    .nav {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
     /* The network has room on its row again: its arrow says it opens. */
     .network__chevron {
       display: block;
