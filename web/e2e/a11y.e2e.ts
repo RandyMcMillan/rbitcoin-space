@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
+import { ARKADE_ID, ID, withArkade, withBark, withBoth } from "./ark-answers";
 import { chain, expect, stubRetargets, test } from "./fixtures";
 import { KEPT, LARGE, stubLarge } from "./large-address";
 import { ACINQ, mainnet, serve } from "./lightning-answers";
@@ -85,9 +86,29 @@ const record = (page: Page) =>
     w.seen = [];
     w.at = [];
     const ids = new Map<Element, number>();
+    // A picture's control draws its ring as a stroke on a shape inside it: at least 2 px, visible,
+    // in --color-focus, the colour the site keeps for focus, so a diagram's own strokes never count.
+    const svgRing = (e: SVGElement): boolean => {
+      const probe = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      probe.style.stroke = "var(--color-focus)";
+      e.append(probe);
+      const focus = getComputedStyle(probe).stroke;
+      probe.remove();
+      return [...e.querySelectorAll("*")].some((x) => {
+        const s = getComputedStyle(x);
+        return (
+          s.stroke === focus &&
+          Number.parseFloat(s.strokeWidth) >= 2 &&
+          Number.parseFloat(s.strokeOpacity) > 0 &&
+          s.visibility !== "hidden"
+        );
+      });
+    };
     w.here = (): Stop | null => {
       const e = document.activeElement;
-      if (!(e instanceof HTMLElement) || e === document.body) return null;
+      // A picture's controls are SVG elements (the Arkade exit path's nodes).
+      if (!(e instanceof HTMLElement || e instanceof SVGElement) || e === document.body)
+        return null;
       if (!ids.has(e)) ids.set(e, ids.size);
       // The ring is the element's own outline, or its field's (the search draws it on its box).
       let ring = false;
@@ -95,6 +116,7 @@ const record = (page: Page) =>
         const s = x && getComputedStyle(x);
         if (s && s.outlineStyle !== "none" && Number.parseFloat(s.outlineWidth) >= 2) ring = true;
       }
+      if (e instanceof SVGElement) ring ||= svgRing(e);
       const header = document.querySelector(".site-header");
       const box = e.getBoundingClientRect();
       const bottom =
@@ -178,7 +200,7 @@ async function walk(page: Page, browserName: string) {
   // Only the stops kept count as reached: presses past the end went round again.
   await page.evaluate((n) => {
     for (const e of (window as unknown as Walked).at.slice(1, n + 1)) {
-      if (e instanceof HTMLElement) e.dataset["walked"] = "";
+      if (e instanceof HTMLElement || e instanceof SVGElement) e.dataset["walked"] = "";
     }
   }, stops.length);
   expect.soft(stops[0]?.name, "the first stop").toBe('a "Skip to content"');
@@ -197,7 +219,7 @@ async function walk(page: Page, browserName: string) {
   const order = await page.evaluate(() => {
     const parts = [".site-header", "#main", ".site-footer"];
     const tabbable = [
-      ...document.querySelectorAll<HTMLElement>(
+      ...document.querySelectorAll<HTMLElement | SVGElement>(
         "a[href], button, input, select, textarea, summary, [tabindex]",
       ),
     ].filter(
@@ -206,7 +228,9 @@ async function walk(page: Page, browserName: string) {
         !(e as HTMLButtonElement).disabled &&
         e.getClientRects().length > 0 &&
         getComputedStyle(e).visibility !== "hidden" &&
-        !e.closest("[inert]"),
+        !e.closest("[inert]") &&
+        // Folded away in a closed <details>, which Tab rightly passes.
+        !e.closest("details:not([open]) > :not(summary)"),
     );
     return {
       positive: tabbable.filter((e) => e.tabIndex > 0).length,
@@ -372,6 +396,30 @@ const PAGES: PageType[] = [
     ready: (p) => p.getByRole("region", { name: "Adding up this address for the first time" }),
     before: (p) => stubLarge(p, { ledger: () => ({ state: "seeding", seconds: 95 }) }),
   },
+  {
+    name: "Ark entry, two implementations",
+    path: "/regtest/ark",
+    ready: (p) => p.getByRole("button", { name: "Arkade" }),
+    before: withBoth,
+  },
+  {
+    name: "Bark VTXO",
+    path: `/regtest/ark/bark/vtxo/${ID}`,
+    ready: (p) => p.getByRole("button", { name: "Play exit" }),
+    before: (p) => withBark(p, true),
+  },
+  {
+    name: "Arkade VTXO, swept",
+    path: `/regtest/ark/arkade/vtxo/${ARKADE_ID}`,
+    ready: (p) => p.getByRole("button", { name: "Play exit" }),
+    before: (p) => withArkade(p),
+  },
+  {
+    name: "Arkade VTXO, unspent and not settled",
+    path: `/regtest/ark/arkade/vtxo/${ARKADE_ID}`,
+    ready: (p) => p.getByRole("button", { name: "Play exit" }),
+    before: (p) => withArkade(p, true),
+  },
 ];
 
 /** Opens a page type and waits until its data is drawn and nothing is still loading. */
@@ -401,6 +449,49 @@ test.describe("every page type", () => {
       expect.soft(await moved(page), "movement under reduced motion").toEqual([]);
     });
   }
+});
+
+// The walk's ring check for a picture's controls: a stroke that is always there is no ring.
+test("an SVG control's ring is a focus-coloured stroke, not any stroke it always has", async ({
+  page,
+}) => {
+  await page.goto("/regtest/no/such/page");
+  // Built through the CSSOM: the policy refuses style attributes and elements.
+  await page.evaluate(() => {
+    const ns = "http://www.w3.org/2000/svg";
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(
+      "g.probe { outline: none !important } g.ringed:focus-visible circle { stroke: var(--color-focus) }",
+    );
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    const svg = document.createElementNS(ns, "svg");
+    for (const [name, stroke] of [
+      ["always", "#888"],
+      ["ringed", "none"],
+    ] as const) {
+      const g = document.createElementNS(ns, "g");
+      g.setAttribute("class", `probe ${name}`);
+      g.setAttribute("tabindex", "0");
+      const c = document.createElementNS(ns, "circle");
+      for (const [k, v] of [
+        ["r", "9"],
+        ["cx", "10"],
+        ["cy", "10"],
+        ["stroke", stroke],
+        ["stroke-width", "2"],
+      ] as const)
+        c.setAttribute(k, v);
+      g.append(c);
+      svg.append(g);
+    }
+    document.querySelector("main")?.prepend(svg);
+  });
+  await record(page);
+  await page.locator("g.always").focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  const { seen } = await noted(page);
+  expect(seen.map((s) => s?.ring)).toStrictEqual([false, true]);
 });
 
 // Escape closes what opened and gives focus back to what opened it.
