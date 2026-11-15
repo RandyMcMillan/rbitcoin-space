@@ -16,6 +16,7 @@ import { cleanAlias } from "../lightning";
 import { Alias } from "../parts";
 import { FEE_ROWS, inRow, rowLabel, type Way } from "./fees";
 import {
+  ChannelId,
   days,
   ENABLED_MEANS,
   ageShort,
@@ -599,14 +600,11 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
         </Show>
         <span class="lnm-card__chan">
           <Link class="ln-id num tap" href={mockPaths.channel(c().id)}>
-            {c().id}
+            <ChannelId id={c().id} />
           </Link>
         </span>
       </p>
-      <p class="lnm-card__line num">
-        <span>
-          {groupDigits(c().capacity)} <span class="lnm-card__k">sats</span>
-        </span>
+      <p class="lnm-card__line lnm-card__fees num">
         <span>
           <span class="lnm-card__k">out</span> {fee(c().out)}
         </span>
@@ -615,10 +613,11 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
         </span>
       </p>
       <p class="lnm-card__state">
-        <StateTag state={c().state} short detail={policyGap(c())} />
         <span class="num">
-          {groupDigits(age())} {age() === 1 ? "day" : "days"}
+          {groupDigits(c().capacity)} <span class="lnm-card__k">sats</span>
         </span>
+        <StateTag state={c().state} short detail={policyGap(c())} />
+        <span class="num">{groupDigits(age())} d</span>
         <span class="num muted">{fresh()}</span>
         <Show when={props.extra}>{(x) => <strong class="num">{x()}</strong>}</Show>
         <button

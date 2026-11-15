@@ -27,6 +27,7 @@ import { btcAxis, cleanAlias, type CloseKind, type FeeRow } from "../lightning";
 import { Alias } from "../parts";
 import { type FeeSummary, feeRowsOf, summary, type Way } from "./fees";
 import {
+  ChannelId,
   Ago,
   days,
   Icon,
@@ -41,6 +42,9 @@ import {
 } from "./parts";
 import { type RecentChange, recentFeeChanges } from "./channels";
 import { type ClosedChannel, MOCK_NOW, type SampleNode } from "./sample";
+
+/** The channel page's fee-history heading: a fee change links straight to it. */
+const FEE_HISTORY = "lnm-feehist-title";
 
 const Chart = lazy(() => import("../../../components/chart/Chart"));
 const DAY = 86_400;
@@ -311,11 +315,15 @@ const RECENT_COLUMNS: Column<RecentChange>[] = [
     cell: (r) => (
       <span class="lnm-row2">
         <span class="lnm-row2__line">
-          <MockChannelLink id={r.channel} />
+          <MockChannelLink id={r.channel} hash={FEE_HISTORY} />
           {/* A phone drops the Whose and When columns; both stay in this cell. */}
-          <span class="lnm-sub lnm-phone-only">{r.way === "out" ? "own" : "peer's"}</span>
+          <span class="lnm-sub lnm-phone-only">{r.way === "out" ? "this node" : "the peer"}</span>
         </span>
-        <span class="lnm-row2__line">
+        {/* Large text stacks the row: the change goes under the id, the From and To cells hide. */}
+        <span class="lnm-row2__line lnm-fromto num">
+          {groupDigits(r.from)} → {groupDigits(r.to)}
+        </span>
+        <span class="lnm-row2__line lnm-row2__line--ends">
           <Link class="lnm-sub" href={mockPaths.node(r.peer.id)}>
             <Alias alias={r.peer.alias} max={18} />
           </Link>
@@ -357,7 +365,7 @@ function ClosedCard(props: { c: ClosedChannel; peerHref: string }) {
         </Link>
         <span class="lnm-card__chan">
           <Link class="ln-id num tap" href={mockPaths.channel(c().id)}>
-            {c().id}
+            <ChannelId id={c().id} />
           </Link>
         </span>
       </p>
@@ -458,8 +466,12 @@ export function NodeFees(props: { node: SampleNode }) {
                 {(r) => (
                   <tr>
                     <th scope="row">{r.label}</th>
-                    <td class="table__num">{figure(out(), r.get)}</td>
-                    <td class="table__num">{figure(inn(), r.get)}</td>
+                    <td class="table__num" data-label="It charges">
+                      {figure(out(), r.get)}
+                    </td>
+                    <td class="table__num" data-label="Its peers charge">
+                      {figure(inn(), r.get)}
+                    </td>
                   </tr>
                 )}
               </For>
@@ -534,7 +546,7 @@ export function NodeFees(props: { node: SampleNode }) {
           caption="The latest fee changes on its channels, newest first"
           columns={RECENT_COLUMNS}
           rows={recentFeeChanges(props.node)}
-          rowHref={(r) => mockPaths.channel(r.channel)}
+          rowHref={(r) => `${mockPaths.channel(r.channel)}#${FEE_HISTORY}`}
           empty={<Empty title="No change kept" />}
         />
       </section>

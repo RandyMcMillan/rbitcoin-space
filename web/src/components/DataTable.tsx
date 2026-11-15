@@ -134,7 +134,10 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 <tr class={props.rowClass?.(row)}>
                   <For each={props.columns}>
                     {(c, k) => (
-                      <td class={cellClass(c)}>
+                      <td
+                        class={cellClass(c)}
+                        data-label={c.hidden === true ? undefined : c.header}
+                      >
                         {c.cell(row, i())}
                         {/* In a column that is never dropped: a dropped one's link takes no room. */}
                         <Show when={k() === linkColumn() && props.rowHref?.(row)}>

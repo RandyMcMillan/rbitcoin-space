@@ -322,10 +322,30 @@ export function shortBtc(amount: number): string {
   return `${Number(btc.toPrecision(2))} BTC`;
 }
 
-export function MockChannelLink(props: { id: string }) {
+/** A channel id with a break opportunity after each "x": it wraps at its separators, never mid-number. */
+export function ChannelId(props: { id: string }) {
+  const parts = () => props.id.split("x");
   return (
-    <Link class="ln-id num" href={mockPaths.channel(props.id)}>
-      {props.id}
+    <For each={parts()}>
+      {(p, i) => (
+        <>
+          {p}
+          <Show when={i() < parts().length - 1}>
+            x<wbr />
+          </Show>
+        </>
+      )}
+    </For>
+  );
+}
+
+export function MockChannelLink(props: { id: string; hash?: string }) {
+  return (
+    <Link
+      class="ln-id num"
+      href={`${mockPaths.channel(props.id)}${props.hash === undefined ? "" : `#${props.hash}`}`}
+    >
+      <ChannelId id={props.id} />
     </Link>
   );
 }

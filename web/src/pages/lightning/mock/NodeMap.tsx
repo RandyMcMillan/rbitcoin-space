@@ -9,7 +9,7 @@ import { groupDigits } from "../../../lib/format";
 import { onNetwork } from "../../../lib/network";
 import { useNetwork } from "../../../lib/page";
 import { cleanAlias, cut } from "../lightning";
-import { days, mockPaths, sats, STATE_LABEL, StateTag, usePhone } from "./parts";
+import { ChannelId, days, mockPaths, sats, STATE_LABEL, StateTag, usePhone } from "./parts";
 import { MOCK_NOW, type OpState, type OpenChannel, type SampleNode } from "./sample";
 import {
   AGE_BANDS,
@@ -217,7 +217,7 @@ export default function NodeMap(props: { node: SampleNode }) {
   const describe = (c: Cell | undefined): string => {
     if (!c) return "Nothing chosen";
     const ch = c.channel;
-    return `${cleanAlias(ch.peer.alias) ?? "No name"}, ${sats(ch.capacity)}, ${groupDigits(days(MOCK_NOW - ch.opened))} days old, fee out ${ch.out ? `${groupDigits(ch.out.fee_rate)} ppm` : "none"}, fee in ${ch.in ? `${groupDigits(ch.in.fee_rate)} ppm` : "none"}, ${STATE_LABEL[ch.state].word}`;
+    return `${cleanAlias(ch.peer.alias) ?? "No name"}, ${ch.id}, ${sats(ch.capacity)}, ${groupDigits(days(MOCK_NOW - ch.opened))} days old, fee out ${ch.out ? `${groupDigits(ch.out.fee_rate)} ppm` : "none"}, fee in ${ch.in ? `${groupDigits(ch.in.fee_rate)} ppm` : "none"}, ${STATE_LABEL[ch.state].word}`;
   };
   const rest = () => props.node.channels.length - drawn().length;
   const restNotEnabled = () =>
@@ -378,6 +378,11 @@ function Readout(props: { channel: OpenChannel | undefined }) {
           <strong>
             <bdi>{cut(cleanAlias(ch().peer.alias) ?? "No name", 32).text}</bdi>
           </strong>
+          {/* Out of the tab order: the read-out is hidden from assistive technology, and Enter on
+              the map opens the same channel. */}
+          <Link class="ln-id num" href={mockPaths.channel(ch().id)} tabindex="-1">
+            <ChannelId id={ch().id} />
+          </Link>
           <span class="num">{sats(ch().capacity)}</span>
           <span class="num">{groupDigits(days(MOCK_NOW - ch().opened))} days</span>
           <span>

@@ -5,7 +5,15 @@ import { SectionHeader } from "../../../components/SectionHeader";
 import { TimeAgo } from "../../../components/Time";
 import { formatUtc, groupDigits } from "../../../lib/format";
 import { feedEvents, type FeedEvent } from "./overview";
-import { Icon, type IconName, KIND_LABEL, MockChannelLink, MockNodeName, sats } from "./parts";
+import {
+  ChannelId,
+  Icon,
+  type IconName,
+  KIND_LABEL,
+  MockChannelLink,
+  MockNodeName,
+  sats,
+} from "./parts";
 import { TIP } from "./sample";
 
 const KEEP = 30;
@@ -160,7 +168,10 @@ export function LiveFeed() {
                     {(into) => (
                       <span class="muted">
                         {" "}
-                        into <span class="num">{into()}</span>
+                        into{" "}
+                        <span class="num">
+                          <ChannelId id={into()} />
+                        </span>
                       </span>
                     )}
                   </Show>

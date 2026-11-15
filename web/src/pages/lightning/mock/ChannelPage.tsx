@@ -26,6 +26,7 @@ import {
 } from "./channels";
 import { inbound } from "./NodeChannels";
 import {
+  ChannelId,
   Ago,
   dayCount,
   days,
@@ -99,7 +100,10 @@ function Body(props: { channel: SampleChannel }) {
       <header class="ln-identity lnm-head">
         <div class="lnm-head__title">
           <h1>
-            Channel <span class="num">{c().id}</span>
+            Channel{" "}
+            <span class="num lnm-idtext">
+              <ChannelId id={c().id} />
+            </span>
           </h1>
           <Show
             when={c().closed}

@@ -1595,7 +1595,7 @@
   /* A rate ends on one vertical line; its base fee has a slot of its own after it. */
   .lnm-fee2 {
     display: inline-grid;
-    grid-template-columns: auto 3.4em;
+    grid-template-columns: auto 5em;
     justify-items: end;
     column-gap: var(--space-1);
   }
@@ -1622,19 +1622,28 @@
     font-family: var(--font-mono);
     font-size: 0.8125rem;
   }
+  /* Out and in side by side in two equal halves, so they line up down the list. */
+  .lnm-card__fees {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .lnm-card__k {
     font-family: var(--font-sans);
     font-size: var(--text-xs);
     color: var(--color-text-muted);
   }
   .lnm-card--tight .lnm-card__state {
-    gap: 0 var(--space-3);
+    gap: 0 var(--space-2);
   }
+  /* Grows with the text, so the chevron stays inside its outline at any size. */
   .lnm-card__toggle {
+    display: inline-grid;
+    place-items: center;
     margin-left: auto;
-    width: 28px;
-    height: 24px;
-    padding: 0;
+    min-width: 28px;
+    min-height: 24px;
+    padding: 0 0.3em;
+    line-height: 1;
     border: 1px solid var(--color-line);
     border-radius: var(--radius-m);
     background: none;
@@ -1645,7 +1654,7 @@
     .lnm-card .lnm-card__toggle.tap {
       display: inline-grid;
       place-items: center;
-      min-height: 0;
+      min-height: 24px;
     }
   }
   .lnm-fees__recent {
@@ -1707,6 +1716,13 @@
   .lnm-phone-only {
     display: none;
   }
+  .lnm-fees__recent .lnm-fromto {
+    display: none;
+  }
+  .lnm-life,
+  .lnm-step {
+    grid-template-columns: minmax(0, 1fr);
+  }
   @media (max-width: 40em) {
     .lnm-phone-only {
       display: inline;
@@ -1715,30 +1731,112 @@
     .lnm-fees__recent .lnm-row2__line {
       flex-wrap: wrap;
     }
+    /* A channel's two ends: a long name or key wraps inside its end, never past it. */
+    .lnm-head .ln-node,
+    .lnm-end .ln-node {
+      min-width: 0;
+      max-width: 100%;
+    }
+    /* In a table a long name ends in "…" (whole in its title) rather than widen the table. */
+    .lnm .table .ln-node__name {
+      max-width: 8.5rem;
+    }
+    .lnm .ln-key,
+    .lnm-head .ln-node__name,
+    .lnm-end .ln-node__name,
+    .lnm-feed__kind {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    /* The age at the right-hand end of the peer's line. */
+    .lnm-fees__recent .lnm-row2 {
+      align-items: stretch;
+    }
+    .lnm-fees__recent .lnm-row2__line--ends {
+      display: flex;
+      justify-content: space-between;
+    }
   }
 
-  /* Enlarged text on a phone (200% at 320 or 390): every box takes the width whole and long figures
-     and ids wrap, so nothing is cut at the edge. */
+  /* Enlarged text on a phone (200% at 320 or 390): every box takes the width whole; names, keys and
+     tags wrap inside their own space, and ids break only at their "x" separators. */
   @media (max-width: 15em) {
+    .lnm .ln-id,
+    .lnm .lnm-tag,
+    .lnm .ln-picker__item,
+    .lnm .ln-node__name,
+    .lnm .ln-key,
+    .lnm .more__summary,
+    .lnm-marker,
+    .lnm .section__meta,
+    .lnm .section__meta * {
+      white-space: normal;
+    }
+    .lnm .ln-node__name,
+    .lnm .ln-key,
+    .lnm h3,
+    .lnm-glance .ln-stat__value,
+    .lnm-glance .ln-stat__value * {
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+    /* A tag flows as text, its icon inline, so it wraps line by line instead of into a pill. */
+    .lnm .lnm-tag {
+      display: inline-block;
+      max-width: 100%;
+    }
+    .lnm .lnm-tag .lnm-icon {
+      vertical-align: -0.125em;
+      margin-inline-end: var(--space-1);
+    }
+    .lnm .lnm-tag,
+    .lnm-marker {
+      border-radius: var(--radius-m);
+    }
+    .lnm .more__summary {
+      overflow-wrap: anywhere;
+      hyphens: auto;
+    }
+    .lnm-step {
+      padding-left: 40px;
+    }
+    /* A shortened hash keeps its eight-character tail whole; the head gives way down to its "…". */
+    .lnm .hash--ends .hash__head {
+      min-width: 1.2ch;
+    }
+    .lnm-step__title > *,
+    .lnm-step__body {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      hyphens: auto;
+    }
+    .lnm .ln-node,
+    .lnm-between > *,
+    .lnm-chanline > *,
+    .lnm-map-controls > *,
+    .lnm-key > *,
+    .lnm-readout__line,
+    .lnm-card__chan,
+    .lnm-server > div,
+    .lnm-feed__kind {
+      min-width: 0;
+      max-width: 100%;
+    }
+    .lnm-key,
+    .lnm .section__meta,
+    .lnm-connect {
+      flex-wrap: wrap;
+    }
     .lnm-glance > * {
       flex-basis: 100%;
       min-width: 0;
-    }
-    .lnm-glance .ln-stat__value,
-    .lnm-glance .ln-stat__value * {
-      white-space: normal;
-      overflow-wrap: anywhere;
     }
     .lnm-card__list > div {
       grid-template-columns: minmax(0, 1fr);
       gap: 0;
     }
-    .lnm-card .ln-id,
-    .lnm-card__chan,
-    .lnm-feed__what .ln-id {
-      min-width: 0;
-      white-space: normal;
-      overflow-wrap: anywhere;
+    .lnm-card__fees {
+      grid-template-columns: minmax(0, 1fr);
     }
     .lnm .ln-fees__plot {
       grid-template-columns: minmax(0, 1fr);
@@ -1746,24 +1844,8 @@
     .lnm .ln-fees__label {
       text-align: left;
     }
-    .lnm-marker,
-    .lnm .section__meta,
-    .lnm .section__meta *,
-    .lnm-server .lnm-tag,
-    .lnm-feed__kind {
-      white-space: normal;
-      min-width: 0;
-    }
-    .lnm .section__meta,
-    .lnm-connect {
-      flex-wrap: wrap;
-    }
     .lnm .more__summary {
       display: flex;
-    }
-    .lnm-server > div {
-      min-width: 0;
-      max-width: 100%;
     }
     .lnm-feed__row {
       grid-template-columns: minmax(0, 1fr);
@@ -1773,21 +1855,55 @@
     .lnm-feed__cap {
       text-align: left;
     }
-    .lnm-feed__what,
-    .lnm-feed__what *,
-    .lnm-readout .lnm-tag {
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
     .lnm .periods ul {
       flex-wrap: wrap;
       overflow: visible;
     }
+
+    /* Tables stack: a row is a block, each figure after its column's name, nothing to swipe. */
+    .lnm .table:not(.lnm-policies) thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .lnm .table:not(.lnm-policies),
+    .lnm .table:not(.lnm-policies) tbody,
+    .lnm .table:not(.lnm-policies) tr {
+      display: block;
+      width: 100%;
+    }
+    .lnm .table:not(.lnm-policies) tr {
+      position: relative;
+      padding: var(--space-2) 0;
+      border-bottom: 1px solid var(--color-line);
+    }
+    .lnm .table:not(.lnm-policies) :is(td, th):not(.table__optional, .table__gone) {
+      display: block;
+      padding: 0;
+      border: 0;
+      text-align: left;
+      white-space: normal;
+    }
+    .lnm .table:not(.lnm-policies) td[data-label]:not(:first-child)::before {
+      /* The space lets a long figure go under its name rather than out of the box. */
+      content: attr(data-label) " ";
+      font-family: var(--font-sans);
+      font-size: var(--text-sm);
+      color: var(--color-text-muted);
+    }
+    .lnm .lnm-fees__recent .lnm-fromto {
+      display: flex;
+    }
+    .lnm .lnm-fees__recent .table:not(.lnm-policies) td:is([data-label="From"], [data-label="To"]) {
+      display: none;
+    }
   }
 
-  /* The narrowest enlarged text (320 px at 200%): the two ends' values stack, each labelled with its
+  /* Enlarged text on a phone (320 or 390 at 200%): the two ends' values stack, each labelled with its
      node, so neither runs into the other. */
-  @media (max-width: 11em) {
+  @media (max-width: 15em) {
     .lnm-policies thead {
       display: none;
     }
