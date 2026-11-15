@@ -521,6 +521,8 @@ mod graph {
             vec![
                 (c1, at(800_000, 0).hash, txid(0xf1)),
                 (c4, at(799_500, 0).hash, txid(0xf4)),
+                // c4's close funded c2, between the same two nodes: a lineage.
+                (c2, at(800_100, 1).hash, txid(0x44)),
             ],
         )
         .await
@@ -934,6 +936,33 @@ async fn nodes_channels_search_and_rankings_answer_exactly_in_both_shapes() {
             400,
         ),
         (format!("/app/lightning/nodes/{one}/channels?page=01"), 400),
+        (format!("/app/lightning/nodes/{one}/channels?sort=fee"), 400),
+        (format!("/app/lightning/nodes/{one}/channels?state=on"), 400),
+        (
+            format!("/app/lightning/nodes/{one}/channels?fee=out:150"),
+            400,
+        ),
+        (format!("/app/lightning/nodes/{one}/channels?q=a%07"), 400),
+        (
+            format!("/app/lightning/nodes/{one}/channels?sort=age&sort=age"),
+            400,
+        ),
+        (
+            format!("/app/lightning/nodes/{one}/channels?status=closed&state=here"),
+            400,
+        ),
+        (
+            format!(
+                "/app/lightning/nodes/{one}/channels?status=closed&sort=lived&kind=force&q=0303"
+            ),
+            200,
+        ),
+        (
+            format!(
+                "/app/lightning/nodes/{one}/channels?sort=peer&dir=asc&state=inactive&fee=in:none&q=0303"
+            ),
+            200,
+        ),
         ("/app/lightning/rankings/liquidity".to_owned(), 400),
         ("/app/lightning/rankings/capacity?limit=101".to_owned(), 400),
         ("/api/v1/lightning/nodes/rankings/capacity".to_owned(), 404),
@@ -1062,6 +1091,9 @@ async fn mainnet_size_routes() -> (Duration, (Duration, String)) {
         "/app/lightning/rankings/age?limit=100".to_owned(),
         format!("/app/lightning/nodes/{hub}"),
         format!("/app/lightning/nodes/{hub}/channels?status=open&page=28"),
+        format!("/app/lightning/nodes/{hub}/channels?sort=age&page=28"),
+        format!("/app/lightning/nodes/{hub}/channels?sort=peer&dir=asc&q=node-1"),
+        format!("/app/lightning/nodes/{hub}/channels?status=closed&sort=lived"),
         format!("/app/lightning/nodes/{hub}/history"),
         format!("/app/lightning/channels/{}", 600_000u64 << 40),
         format!("/api/v1/lightning/nodes/{hub}"),
