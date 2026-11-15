@@ -277,7 +277,7 @@ export function msatAsSats(msat: number): string {
   const sign = msat < 0 ? "−" : "";
   const m = Math.abs(msat);
   // Under a sat: in msat, as operators and their software write it.
-  if (m < 1000) return `${sign}${groupDigits(m)} msat`;
+  if (m > 0 && m < 1000) return `${sign}${groupDigits(m)} msat`;
   const whole = Math.floor(m / 1000);
   const frac =
     m % 1000 === 0
@@ -290,7 +290,11 @@ export function msatAsSats(msat: number): string {
 
 /** A base fee in a fee column, without its unit (the heading carries it): `1`, `0.5`, `0`. */
 export const baseShort = (msat: number): string =>
-  msat % 1000 === 0 ? groupDigits(msat / 1000) : String(Number((msat / 1000).toFixed(3)));
+  msat > 0 && msat < 1000
+    ? `${groupDigits(msat)} msat`
+    : msat % 1000 === 0
+      ? groupDigits(msat / 1000)
+      : String(Number((msat / 1000).toFixed(3)));
 
 /** Whole days, the one form a column of ages takes. */
 export const days = (seconds: number): number => Math.max(0, Math.floor(seconds / 86_400));
@@ -300,6 +304,10 @@ export const dayCount = (n: number): string => `${groupDigits(n)} ${n === 1 ? "d
 
 /** Whole hours, the one form a column of update ages takes. */
 export const hours = (seconds: number): number => Math.max(0, Math.floor(seconds / 3600));
+
+/** A policy's age: hours up to two days, whole days after (`5 h`, `28 d`). */
+export const ageShort = (seconds: number): string =>
+  hours(seconds) <= 48 ? `${groupDigits(hours(seconds))} h` : `${groupDigits(days(seconds))} d`;
 
 /** A transaction id, shortened, linked to the site's transaction page, with copy beside it. */
 export function TxLink(props: { txid: string; label: string }) {

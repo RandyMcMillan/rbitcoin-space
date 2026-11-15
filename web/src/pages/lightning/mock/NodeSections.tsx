@@ -1,7 +1,16 @@
 // Mockup: a node's closed channels (paged, by kind and peer), its fee rates (a bar opens the
 // channels in that row) and its past, as two small charts on fitted axes.
 import { useNavigate, useSearchParams } from "@solidjs/router";
-import { createEffect, createMemo, For, lazy, Loading as Pending, onSettled, Show } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  lazy,
+  Loading as Pending,
+  onSettled,
+  Show,
+} from "solid-js";
 import { sorted } from "../../../components/chart/geometry";
 import { Link } from "../../../components/Link";
 import { Pagination } from "../../../components/Pagination";
@@ -23,7 +32,6 @@ import {
   Icon,
   KindTag,
   MockChannelLink,
-  MockNodeName,
   mockPaths,
   param,
   sats,
@@ -209,59 +217,7 @@ export function NodeClosed(props: { node: SampleNode }) {
           when={!phone()}
           fallback={
             <ol class="lnm-cards">
-              <For each={shown()}>
-                {(c) => (
-                  <li class="lnm-card">
-                    <p class="lnm-card__id">
-                      <Link class="ln-node__name tap" href={peerHref(c.peer.id)} noscroll>
-                        <Alias alias={c.peer.alias} max={24} />
-                      </Link>
-                      <span class="lnm-card__chan">
-                        <Link class="ln-id num tap" href={mockPaths.channel(c.id)}>
-                          {c.id}
-                        </Link>
-                      </span>
-                    </p>
-                    <p class="lnm-card__line num">
-                      <span>{groupDigits(c.capacity)}</span>
-                      <span>
-                        lived {groupDigits(days(c.closedTime - c.opened))}{" "}
-                        {days(c.closedTime - c.opened) === 1 ? "day" : "days"}
-                      </span>
-                    </p>
-                    <p class="lnm-card__state">
-                      <KindTag kind={c.kind} />
-                      <span class="num">{formatDay(c.closedTime)}</span>
-                    </p>
-                    <Show when={c.continued}>
-                      {(n) => (
-                        <p class="lnm-card__state lnm-continued">
-                          Continued as <MockChannelLink id={n()} />
-                        </p>
-                      )}
-                    </Show>
-                    <details class="lnm-card__more">
-                      <summary class="tap">More</summary>
-                      <dl class="lnm-card__list">
-                        <div>
-                          <dt>Block</dt>
-                          <dd class="num">{groupDigits(c.closedHeight)}</dd>
-                        </div>
-                        <div>
-                          <dt>Closing fee</dt>
-                          <dd class="num">{sats(c.fee)}</dd>
-                        </div>
-                        <div>
-                          <dt>Closing transaction</dt>
-                          <dd>
-                            <TxLink txid={c.txid} label="Copy closing transaction ID" />
-                          </dd>
-                        </div>
-                      </dl>
-                    </details>
-                  </li>
-                )}
-              </For>
+              <For each={shown()}>{(c) => <ClosedCard c={c} peerHref={peerHref(c.peer.id)} />}</For>
             </ol>
           }
         >
@@ -351,14 +307,30 @@ export function NodeClosed(props: { node: SampleNode }) {
 
 const RECENT_COLUMNS: Column<RecentChange>[] = [
   {
-    header: "Peer",
+    header: "Channel and peer",
     cell: (r) => (
       <span class="lnm-row2">
-        <MockNodeName node={r.peer} />
+        <span class="lnm-row2__line">
+          <MockChannelLink id={r.channel} />
+          {/* A phone drops the Whose and When columns; both stay in this cell. */}
+          <span class="lnm-sub lnm-phone-only">{r.way === "out" ? "own" : "peer's"}</span>
+        </span>
+        <span class="lnm-row2__line">
+          <Link class="lnm-sub" href={mockPaths.node(r.peer.id)}>
+            <Alias alias={r.peer.alias} max={18} />
+          </Link>
+          <span class="lnm-sub lnm-phone-only">
+            <Ago time={r.time} />
+          </span>
+        </span>
       </span>
     ),
   },
-  { header: "Whose", cell: (r) => (r.way === "out" ? "This node" : "The peer") },
+  {
+    header: "Whose",
+    optional: true,
+    cell: (r) => (r.way === "out" ? "This node" : "The peer"),
+  },
   { header: "From", numeric: true, cell: (r) => groupDigits(r.from) },
   { header: "To", numeric: true, cell: (r) => groupDigits(r.to) },
   { header: "When", numeric: true, optional: true, cell: (r) => <Ago time={r.time} /> },
@@ -371,6 +343,74 @@ const WAYS: { way: Way; key: "outgoing" | "incoming"; word: string }[] = [
   { way: "out", key: "outgoing", word: "It charges" },
   { way: "in", key: "incoming", word: "Its peers charge" },
 ];
+
+/** A closed channel on a phone: the open card's shape, with the rest behind the same chevron. */
+function ClosedCard(props: { c: ClosedChannel; peerHref: string }) {
+  const c = () => props.c;
+  const [open, setOpen] = createSignal(false);
+  const lived = () => days(c().closedTime - c().opened);
+  return (
+    <li class="lnm-card lnm-card--tight">
+      <p class="lnm-card__id">
+        <Link class="ln-node__name tap" href={props.peerHref} noscroll>
+          <Alias alias={c().peer.alias} max={22} />
+        </Link>
+        <span class="lnm-card__chan">
+          <Link class="ln-id num tap" href={mockPaths.channel(c().id)}>
+            {c().id}
+          </Link>
+        </span>
+      </p>
+      <p class="lnm-card__line num">
+        <span>
+          {groupDigits(c().capacity)} <span class="lnm-card__k">sats</span>
+        </span>
+        <span>
+          <span class="lnm-card__k">lived</span> {groupDigits(lived())}{" "}
+          {lived() === 1 ? "day" : "days"}
+        </span>
+      </p>
+      <p class="lnm-card__state">
+        <KindTag kind={c().kind} />
+        <span class="num">{formatDay(c().closedTime)}</span>
+        <button
+          type="button"
+          class="lnm-card__toggle tap"
+          aria-expanded={open() ? "true" : "false"}
+          aria-label={`More about ${c().id}`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <span aria-hidden="true">{open() ? "▴" : "▾"}</span>
+        </button>
+      </p>
+      <Show when={c().continued}>
+        {(n) => (
+          <p class="lnm-card__state lnm-continued">
+            Continued as <MockChannelLink id={n()} />
+          </p>
+        )}
+      </Show>
+      <Show when={open()}>
+        <dl class="lnm-card__list">
+          <div>
+            <dt>Block</dt>
+            <dd class="num">{groupDigits(c().closedHeight)}</dd>
+          </div>
+          <div>
+            <dt>Closing fee</dt>
+            <dd class="num">{sats(c().fee)}</dd>
+          </div>
+          <div>
+            <dt>Closing transaction</dt>
+            <dd>
+              <TxLink txid={c().txid} label="Copy closing transaction ID" />
+            </dd>
+          </div>
+        </dl>
+      </Show>
+    </li>
+  );
+}
 
 export function NodeFees(props: { node: SampleNode }) {
   const navigate = useNavigate();
@@ -494,6 +534,7 @@ export function NodeFees(props: { node: SampleNode }) {
           caption="The latest fee changes on its channels, newest first"
           columns={RECENT_COLUMNS}
           rows={recentFeeChanges(props.node)}
+          rowHref={(r) => mockPaths.channel(r.channel)}
           empty={<Empty title="No change kept" />}
         />
       </section>

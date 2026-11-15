@@ -17,7 +17,6 @@ import {
   ageBand,
   mix,
   PPM_LABELS,
-  PPM_TOKENS,
   ppmBand,
   type Rect,
   squarify,
@@ -66,7 +65,9 @@ export default function NodeMap(props: { node: SampleNode }) {
   let canvas: HTMLCanvasElement | undefined;
   let frame: HTMLDivElement | undefined;
 
-  const height = () => Math.round(Math.min(560, Math.max(300, width() * 0.56)));
+  const full = () => Math.min(560, Math.max(300, width() * 0.56));
+  // A handful of channels needs no full-height map: half, so the cells stay wide, not tall.
+  const height = () => Math.round(drawn().length < 12 ? full() / 2 : full());
   const total = () => props.node.channels.reduce((s, c) => s + c.capacity, 0);
   // Already largest first.
   const drawn = createMemo(() => props.node.channels.slice(0, cap()));
@@ -98,7 +99,7 @@ export default function NodeMap(props: { node: SampleNode }) {
       return mix(token("--lnm-age"), token("--color-surface"), AGE_MIX[band] ?? 1);
     }
     const p = by === "out" ? ch.out : ch.in;
-    return p ? token(`--fee-${PPM_TOKENS[ppmBand(p.fee_rate)] ?? 1}`) : token("--color-line");
+    return p ? token(`--lnm-ppm-${ppmBand(p.fee_rate) + 1}`) : token("--color-line");
   };
 
   const draw = () => {
@@ -414,7 +415,7 @@ function Key(props: { colouring: Colouring }) {
         <For each={PPM_LABELS}>
           {(label, i) => (
             <li>
-              <span class={`lnm-key__swatch lnm-fee-${PPM_TOKENS[i()] ?? 1}`} aria-hidden="true" />
+              <span class={`lnm-key__swatch lnm-ppm-${i() + 1}`} aria-hidden="true" />
               <span class="num">{label}</span>
             </li>
           )}

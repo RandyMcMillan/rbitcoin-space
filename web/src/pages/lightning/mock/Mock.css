@@ -5,17 +5,37 @@
   .lnm {
     --lnm-caution: #c2410c;
     --lnm-age: #0f766e;
+    /* Forwarding rates in ppm, quiet to strong; separate from the site's sat/vB fee colours. They
+       step in lightness as well as hue (darker in light, lighter in dark), so neighbours part. */
+    --lnm-ppm-1: #9399a0;
+    --lnm-ppm-2: #6c90a9;
+    --lnm-ppm-3: #4d82b3;
+    --lnm-ppm-4: #466eb8;
+    --lnm-ppm-5: #5255b6;
+    --lnm-ppm-6: #5c3bab;
     gap: var(--space-6);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .lnm {
       --lnm-caution: #fb923c;
       --lnm-age: #26b3a1;
+      --lnm-ppm-1: #646a70;
+      --lnm-ppm-2: #597f9b;
+      --lnm-ppm-3: #5b90c7;
+      --lnm-ppm-4: #7a9ce9;
+      --lnm-ppm-5: #a9a5ff;
+      --lnm-ppm-6: #d8aeff;
     }
   }
   :root[data-theme="dark"] .lnm {
     --lnm-caution: #fb923c;
     --lnm-age: #26b3a1;
+    --lnm-ppm-1: #646a70;
+    --lnm-ppm-2: #597f9b;
+    --lnm-ppm-3: #5b90c7;
+    --lnm-ppm-4: #7a9ce9;
+    --lnm-ppm-5: #a9a5ff;
+    --lnm-ppm-6: #d8aeff;
   }
   .lnm-nav {
     margin-bottom: calc(var(--space-5) * -1);
@@ -409,6 +429,14 @@
   .lnm-barbtn:disabled {
     cursor: default;
   }
+  /* Out and in stacked (a phone): an empty direction takes no line, so a band is as tall as its
+     bars. A band with neither keeps one empty line. Colour tells the directions apart. */
+  @container not (min-width: 30rem) {
+    .ln-fees__bars:has(.lnm-barbtn:not(:disabled)) .lnm-barbtn:disabled,
+    .lnm-barbtn:disabled + .lnm-barbtn:disabled {
+      display: none;
+    }
+  }
   @media (hover: hover) {
     .lnm-barbtn:not(:disabled):hover {
       background: var(--color-surface-sunken);
@@ -477,42 +505,6 @@
   }
   .lnm-age-5 {
     --sw: color-mix(in srgb, var(--lnm-age) 20%, var(--color-surface));
-  }
-  .lnm-fee-1 {
-    --sw: var(--fee-1);
-  }
-  .lnm-fee-2 {
-    --sw: var(--fee-2);
-  }
-  .lnm-fee-3 {
-    --sw: var(--fee-3);
-  }
-  .lnm-fee-4 {
-    --sw: var(--fee-4);
-  }
-  .lnm-fee-5 {
-    --sw: var(--fee-5);
-  }
-  .lnm-fee-6 {
-    --sw: var(--fee-6);
-  }
-  .lnm-fee-7 {
-    --sw: var(--fee-7);
-  }
-  .lnm-fee-8 {
-    --sw: var(--fee-8);
-  }
-  .lnm-fee-9 {
-    --sw: var(--fee-9);
-  }
-  .lnm-fee-10 {
-    --sw: var(--fee-10);
-  }
-  .lnm-fee-11 {
-    --sw: var(--fee-11);
-  }
-  .lnm-fee-12 {
-    --sw: var(--fee-12);
   }
   .lnm-state-active {
     --sw: color-mix(in srgb, var(--color-text) 16%, var(--color-surface));
@@ -1178,6 +1170,12 @@
     margin: 0;
     overflow-wrap: anywhere;
   }
+  .lnm-ident__title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--space-3);
+  }
   .lnm-ident__line {
     display: flex;
     flex-wrap: wrap;
@@ -1267,6 +1265,7 @@
   }
   .lnm-card {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-1);
     padding: var(--space-3) 0;
     border-bottom: 1px solid var(--color-line);
@@ -1314,12 +1313,6 @@
     align-items: center;
     gap: 0 var(--space-4);
     font-size: var(--text-sm);
-  }
-  .lnm-card__more summary {
-    width: max-content;
-    font-size: var(--text-sm);
-    color: var(--color-text-muted);
-    cursor: pointer;
   }
   .lnm-card__list {
     display: grid;
@@ -1709,5 +1702,127 @@
     .lnm-policies thead th {
       text-align: left;
     }
+  }
+
+  .lnm-phone-only {
+    display: none;
+  }
+  @media (max-width: 40em) {
+    .lnm-phone-only {
+      display: inline;
+    }
+    /* At 320 the id and its tag share too little width; the tag drops under the id. */
+    .lnm-fees__recent .lnm-row2__line {
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Enlarged text on a phone (200% at 320 or 390): every box takes the width whole and long figures
+     and ids wrap, so nothing is cut at the edge. */
+  @media (max-width: 15em) {
+    .lnm-glance > * {
+      flex-basis: 100%;
+      min-width: 0;
+    }
+    .lnm-glance .ln-stat__value,
+    .lnm-glance .ln-stat__value * {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .lnm-card__list > div {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+    }
+    .lnm-card .ln-id,
+    .lnm-card__chan,
+    .lnm-feed__what .ln-id {
+      min-width: 0;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .lnm .ln-fees__plot {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .lnm .ln-fees__label {
+      text-align: left;
+    }
+    .lnm-marker,
+    .lnm .section__meta,
+    .lnm .section__meta *,
+    .lnm-server .lnm-tag,
+    .lnm-feed__kind {
+      white-space: normal;
+      min-width: 0;
+    }
+    .lnm .section__meta,
+    .lnm-connect {
+      flex-wrap: wrap;
+    }
+    .lnm .more__summary {
+      display: flex;
+    }
+    .lnm-server > div {
+      min-width: 0;
+      max-width: 100%;
+    }
+    .lnm-feed__row {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: "kind" "time" "what" "cap" "ends";
+    }
+    .lnm-feed__time,
+    .lnm-feed__cap {
+      text-align: left;
+    }
+    .lnm-feed__what,
+    .lnm-feed__what *,
+    .lnm-readout .lnm-tag {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .lnm .periods ul {
+      flex-wrap: wrap;
+      overflow: visible;
+    }
+  }
+
+  /* The narrowest enlarged text (320 px at 200%): the two ends' values stack, each labelled with its
+     node, so neither runs into the other. */
+  @media (max-width: 11em) {
+    .lnm-policies thead {
+      display: none;
+    }
+    .lnm-policies tbody tr {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .lnm-policies td[data-end] {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0 var(--space-2);
+      overflow-wrap: anywhere;
+    }
+    .lnm-policies td[data-end]::before {
+      content: attr(data-end);
+      color: var(--color-text-muted);
+      font-family: var(--font-sans);
+    }
+  }
+
+  .lnm-ppm-1 {
+    --sw: var(--lnm-ppm-1);
+  }
+  .lnm-ppm-2 {
+    --sw: var(--lnm-ppm-2);
+  }
+  .lnm-ppm-3 {
+    --sw: var(--lnm-ppm-3);
+  }
+  .lnm-ppm-4 {
+    --sw: var(--lnm-ppm-4);
+  }
+  .lnm-ppm-5 {
+    --sw: var(--lnm-ppm-5);
+  }
+  .lnm-ppm-6 {
+    --sw: var(--lnm-ppm-6);
   }
 }

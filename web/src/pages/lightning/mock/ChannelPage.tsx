@@ -45,8 +45,8 @@ import { MOCK_NOW, type OpState, type Policy } from "./sample";
 
 const Chart = lazy(() => import("../../../components/chart/Chart"));
 
-/** An axis tick in ppm: whole numbers, and one decimal where a small range needs halves. */
-const tick = (v: number) => (Number.isInteger(v) ? groupDigits(v) : v.toFixed(1));
+/** An axis tick in ppm: whole numbers only; a half-step line stays unlabelled. */
+const tick = (v: number) => (Number.isInteger(v) ? groupDigits(v) : "");
 
 export default function MockChannelPage() {
   const params = useParams<{ id: string }>();
@@ -594,8 +594,13 @@ function Policies(props: { channel: SampleChannel }) {
                     {/* A phone has no room for the fourth column: the difference sits under the term. */}
                     <span class="lnm-diff-under">{diff(t)}</span>
                   </th>
-                  <td class="table__num">{one().policy ? t.cell(one().policy as Policy) : "–"}</td>
-                  <td class="table__num">{two().policy ? t.cell(two().policy as Policy) : "–"}</td>
+                  {/* data-end labels a value where the narrowest layout stacks the two ends. */}
+                  <td class="table__num" data-end={name(one().node)}>
+                    {one().policy ? t.cell(one().policy as Policy) : "–"}
+                  </td>
+                  <td class="table__num" data-end={name(two().node)}>
+                    {two().policy ? t.cell(two().policy as Policy) : "–"}
+                  </td>
                   <td class="table__num table__optional lnm-diff">{diff(t)}</td>
                 </tr>
               )}

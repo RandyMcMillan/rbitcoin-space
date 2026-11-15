@@ -61,8 +61,6 @@ export function squarify(values: readonly number[], w: number, h: number): Rect[
  *  500 to 999, 1 000 to 2 499, 2 500 and up. */
 export const PPM_BANDS = [0, 1, 100, 500, 1_000, 2_500] as const;
 export const PPM_LABELS = ["0", "1–99", "100–499", "500–999", "1 000–2 499", "2 500+"] as const;
-/** The fee-ramp token each band takes: spread across the ramp so neighbours differ. */
-export const PPM_TOKENS = [1, 4, 6, 8, 10, 12] as const;
 
 export const ppmBand = (ppm: number): number => PPM_BANDS.filter((b) => ppm >= b).length - 1;
 

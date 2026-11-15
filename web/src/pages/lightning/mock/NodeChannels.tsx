@@ -18,7 +18,7 @@ import { FEE_ROWS, inRow, rowLabel, type Way } from "./fees";
 import {
   days,
   ENABLED_MEANS,
-  hours,
+  ageShort,
   MockChannelLink,
   mockPaths,
   baseShort,
@@ -150,9 +150,9 @@ export function NodeChannels(props: { node: SampleNode }) {
     const n = smaller();
     return n === null ? null : new Set(props.node.channels.slice(n).map((c) => c.id));
   });
-  const matching = createMemo(() => {
+  // Every filter but the state chips: the chips count within it.
+  const scoped = createMemo(() => {
     const q = query().trim().toLowerCase();
-    const st = state();
     const f = fee();
     const p = peer();
     const g = grouped();
@@ -163,11 +163,14 @@ export function NodeChannels(props: { node: SampleNode }) {
           c.scid === q ||
           (cleanAlias(c.peer.alias) ?? "").toLowerCase().includes(q) ||
           c.peer.id.startsWith(q)) &&
-        (st === null || c.state === st) &&
         (f === null || inRow(c, f.way, f.from)) &&
         (p === null || c.peer.id === p) &&
         (g === null || g.has(c.id)),
     );
+  });
+  const matching = createMemo(() => {
+    const st = state();
+    return st === null ? scoped() : scoped().filter((c) => c.state === st);
   });
   const ordered = createMemo(() => {
     const s = sort();
@@ -185,7 +188,7 @@ export function NodeChannels(props: { node: SampleNode }) {
   const shown = () => ordered().slice((current() - 1) * perPage(), current() * perPage());
   const counts = createMemo(() => {
     const n: Record<OpState, number> = { active: 0, here: 0, peer: 0, inactive: 0 };
-    for (const c of props.node.channels) n[c.state] += 1;
+    for (const c of scoped()) n[c.state] += 1;
     return n;
   });
   const peerShown = () => props.node.channels.find((c) => c.peer.id === peer())?.peer;
@@ -284,7 +287,7 @@ export function NodeChannels(props: { node: SampleNode }) {
             aria-pressed={state() === null ? "true" : "false"}
             onClick={() => setSearch({ state: undefined, page: undefined })}
           >
-            All <span class="num muted">{groupDigits(props.node.channels.length)}</span>
+            All <span class="num muted">{groupDigits(scoped().length)}</span>
           </button>
           <For each={STATES}>
             {(s) => (
@@ -438,7 +441,7 @@ export function NodeChannels(props: { node: SampleNode }) {
                   {header("CLTV Δ", "this node", "cltv", "table__num")}
                   {header("Max HTLC", "this node, sats", "htlc", "table__num")}
                   {header("State", "policies", null, "lnm-statecol")}
-                  {header("Updated", "older policy, h ago", "update", "table__num")}
+                  {header("Updated", "older policy, ago", "update", "table__num")}
                 </tr>
               </thead>
               <tbody>
@@ -504,7 +507,7 @@ export function NodeChannels(props: { node: SampleNode }) {
                       <td class="lnm-statecol">
                         <StateTag state={c.state} detail={policyGap(c)} />
                       </td>
-                      <td class="table__num">{groupDigits(hours(MOCK_NOW - c.last_update))}</td>
+                      <td class="table__num">{ageShort(MOCK_NOW - c.last_update)}</td>
                     </tr>
                   )}
                 </For>
@@ -525,8 +528,8 @@ export function NodeChannels(props: { node: SampleNode }) {
         <p>
           Fee out is what <bdi>{name()}</bdi> charges to forward over the channel; fee in is what
           the peer charges to forward towards it. An inbound discount (lnd's inbound fee) is what an
-          end takes off for a payment arriving over the channel. "Updated" is the older of the two
-          policies. {ENABLED_MEANS}
+          end takes off for a payment arriving over the channel. "Updated" is the older known
+          policy. {ENABLED_MEANS}
         </p>
       </More>
     </section>
@@ -560,6 +563,10 @@ function Fee(props: { p: Policy | null }) {
   );
 }
 
+/** One end's policy age for a card's details: `this node 5 h ago`, `peer missing`. */
+const policyAge = (who: string, p: Policy | null): string =>
+  p ? `${who} ${ageShort(MOCK_NOW - p.last_update)} ago` : `${who} missing`;
+
 /** An inbound discount: `−50 ppm`, `−25 ppm −1 sat`. */
 export const inbound = (p: Policy): string =>
   `${p.inbound_rate < 0 ? "−" : ""}${groupDigits(Math.abs(p.inbound_rate))} ppm${
@@ -572,12 +579,10 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
   const c = () => props.c;
   const [open, setOpen] = createSignal(false);
   const fee = (p: Policy | null) =>
-    p ? `${groupDigits(p.fee_rate)} ppm +${baseShort(p.base_fee_msat)}` : "–";
+    p ? `${groupDigits(p.fee_rate)} ppm +${msatAsSats(p.base_fee_msat)}` : "–";
   const age = () => days(MOCK_NOW - c().opened);
   const fresh = () =>
-    Number.isFinite(c().last_update)
-      ? `upd ${groupDigits(hours(MOCK_NOW - c().last_update))} h`
-      : "";
+    Number.isFinite(c().last_update) ? `upd ${ageShort(MOCK_NOW - c().last_update)}` : "";
   return (
     <li class="lnm-card lnm-card--tight">
       <p class="lnm-card__id">
@@ -658,11 +663,7 @@ function Card(props: { c: OpenChannel; together: number; peerHref: string; extra
           <div>
             <dt>Policies updated</dt>
             <dd class="num">
-              this node{" "}
-              {c().out ? `${groupDigits(hours(MOCK_NOW - (c().out?.last_update ?? 0)))} h` : "none"}
-              , the peer{" "}
-              {c().in ? `${groupDigits(hours(MOCK_NOW - (c().in?.last_update ?? 0)))} h` : "none"}{" "}
-              ago
+              {[policyAge("this node", c().out), policyAge("peer", c().in)].join("; ")}
             </dd>
           </div>
           <div>

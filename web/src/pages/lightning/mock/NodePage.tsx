@@ -12,7 +12,7 @@ import { More } from "../../../components/More";
 import { scrollCue } from "../../../components/scrollCue";
 import { Empty } from "../../../components/States";
 import { SectionHeader } from "../../../components/SectionHeader";
-import { groupDigits } from "../../../lib/format";
+import { groupDigits, truncateMiddle } from "../../../lib/format";
 import { usePageTitle } from "../../../lib/page";
 import { cleanAlias, cut, NAME_IN_TITLE } from "../lightning";
 import { Stat } from "../parts";
@@ -146,11 +146,16 @@ function Identity(props: { node: SampleNode }) {
   const newest = () => Math.max(...props.node.channels.map((c) => c.last_update));
   return (
     <header class="lnm-ident">
-      <h1>
-        <Show when={name()} fallback={<span class="ln-alias--none">Unnamed node</span>}>
-          {(t) => <bdi class="ln-alias">{cut(t(), NAME_IN_TITLE).text}</bdi>}
-        </Show>
-      </h1>
+      <div class="lnm-ident__title">
+        <h1>
+          <Show when={name()} fallback={<span class="ln-alias--none">Unnamed node</span>}>
+            {(t) => <bdi class="ln-alias">{cut(t(), NAME_IN_TITLE).text}</bdi>}
+          </Show>
+        </h1>
+        <span class="ln-key" title={props.node.id}>
+          {truncateMiddle(props.node.id, 8, 6)}
+        </span>
+      </div>
       <p class="lnm-ident__line">
         <span>
           <strong class="num">{shortBtc(capacity())}</strong>,{" "}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSats } from "./ChannelPage";
-import { msatAsSats } from "./parts";
+import { ageShort, baseShort, msatAsSats } from "./parts";
 import { mix, squarify } from "./treemap";
 
 describe("the mockups' pure parts", () => {
@@ -21,8 +21,19 @@ describe("the mockups' pure parts", () => {
     expect(msatAsSats(1)).toBe("1 msat");
     expect(msatAsSats(1_000_000_999)).toBe("1\u202F000\u202F000.999 sats");
     expect(msatAsSats(1100)).toBe("1.1 sats");
+    expect(msatAsSats(0)).toBe("0 sats");
     expect(msatAsSats(-1000)).toBe("−1 sat");
     expect(msatAsSats(20_000_000_000)).toBe("20 000 000 sats");
+  });
+
+  it("keeps a sub-sat base fee in msat, and a policy's age in days past two days", () => {
+    expect(baseShort(1)).toBe("1 msat");
+    expect(baseShort(1000)).toBe("1");
+    expect(baseShort(1500)).toBe("1.5");
+    expect(baseShort(0)).toBe("0");
+    expect(ageShort(5 * 3600)).toBe("5 h");
+    expect(ageShort(48 * 3600)).toBe("48 h");
+    expect(ageShort(28 * 86_400)).toBe("28 d");
   });
 
   it("mixes colours written short or long", () => {
