@@ -819,6 +819,7 @@ Answered from an index of the verified graph that the server rebuilds every 30 s
 | `page` (ours) | 0 to 4,000, 25 channels a page | `400` |
 | `index` (reference) | An offset, 0 to 100,000, 10 channels a page | `400` |
 | `limit` (rankings) | 1 to 100, default 25, as for the channel lists above | `400` |
+| `limit` (a node's fee changes) | 1 to 50, default 10, written plainly | `400 limit is 1 to 50` |
 | `sort` (a node's channels) | Open: `capacity` (the default), `age`, `out`, `in`, `cltv`, `htlc`, `update`, `peer`. Closed: `closed` (the default), `capacity`, `fee`, `lived` | `400` |
 | `dir` | `asc` or `desc` | `400 dir is asc or desc` |
 | `q` (a node's channels) | 1 to 66 characters once percent-decoded and trimmed, valid UTF-8, no control character | `400 filter text is 1 to 66 characters, without control characters` |
@@ -827,7 +828,7 @@ Answered from an index of the verified graph that the server rebuilds every 30 s
 | `fee` (open channels) | `out:` or `in:`, then a bucket of the node's fee histogram (0 to 9, then 10, 20 … 90, 100, 200 … 900, 1000, 2000 …, up to 4,294,967,000), a run of them as two buckets joined by `-`, the first no higher (`10-40`), or `none` | `400` |
 | `kind` (closed channels) | `cooperative`, `force`, `penalty` or `other` | `400` |
 
-A parameter given twice is `400`, and so is `state` or `fee` with `status=closed`, `kind` with open channels, and a `sort` of the other status. `/app` routes that take parameters (search, rankings, a node's channels, the overview, which takes none) refuse unknown ones, and the others ignore a query string; `/api/v1` routes ignore unknown parameters, like every `/api/v1` query, so cache-busting works. A node or channel we do not hold is `404` (`node not found`, `channel not found`); a page past the end is an empty list. A node is held while it has an open channel in the graph.
+A parameter given twice is `400`, and so is `state` or `fee` with `status=closed`, `kind` with open channels, and a `sort` of the other status. `/app` routes that take parameters (search, rankings, a node's channels, a node's fee changes, the overview and a channel's fee history, which take none) refuse unknown ones, and the others ignore a query string; `/api/v1` routes ignore unknown parameters, like every `/api/v1` query, so cache-busting works. A node or channel we do not hold is `404` (`node not found`, `channel not found`); a page past the end is an empty list. A node is held while it has an open channel in the graph.
 
 **Search** matches public keys by prefix (hex, any case) in key order, then aliases by substring (Unicode lowercase on both sides), most capacity first: at most 10 nodes. A query that parses as a channel id also returns that channel, open or closed. Its cost is a binary search and one pass over at most 13,600 aliases of at most 32 bytes, whatever the query: 0.5 ms on mainnet.
 
@@ -835,7 +836,7 @@ A parameter given twice is `400`, and so is `state` or `fee` with `status=closed
 
 ##### `/app/lightning/…`
 
-What the Lightning pages read; one request for each page's main content. Real mainnet answers, 2026-11-12 (the node page 2026-11-15), trimmed where `…`.
+What the Lightning pages read; one request for each page's main content. Real mainnet answers, 2026-11-12 (the node page and fee history 2026-11-15), trimmed where `…`.
 
 | Route | Answer |
 |---|---|
@@ -846,6 +847,8 @@ What the Lightning pages read; one request for each page's main content. Real ma
 | `GET /nodes/:key/channels?status=&page=&sort=&dir=&q=&peer=&state=&fee=&kind=` | `{status, page, per_page, total, sort, dir, channels}`, and for open channels `states`: open channels from the index, largest first unless sorted otherwise; closed ones from the store, newest close first unless sorted otherwise ([below](#a-nodes-channels)) |
 | `GET /nodes/:key/history` | `{from, points: [{time, channels, capacity}]}`: the node's open channels and capacity at each UTC midnight since `from` (when our history starts: the first statistics snapshot; `null` before it), at the block time of each of its channels' opens and closes after the first midnight, then now, oldest first. A chart steps at the changes rather than drawing a slope between midnights |
 | `GET /channels/:id` | The channel page: below. Open or closed |
+| `GET /channels/:id/fees` | `{id, scid, node_one, node_two, watched}`: the channel's [fee history](#fee-history), each end's records oldest first |
+| `GET /nodes/:key/fees?limit=` | `{changes}`: the newest fee changes on the node's open channels, either end's, newest first ([below](#fee-history)) |
 | `GET /tx/:txid` | `{opened, closed}`: the channels this transaction funded and closed, each as in the channel lists above. For the transaction page |
 
 `state` is `active` (some direction has an enabled policy), `inactive` (none: disabled, or no policy received within LDK's two weeks) or `closed`. `fee_rate` in a node's channel list is that node's own policy on the channel, ppm. Times are Unix seconds; `first_seen` is the oldest funding block time among the node's channels we hold, open or closed.
@@ -888,7 +891,7 @@ GET /app/lightning/channels/811984x2037x0
  "closed": null, "penalty": null, "continued_as": null, "continued_from": null}
 ```
 
-`policy` is what that node charges to forward over the channel, `null` until it sent one and for a closed channel. `funding.txid` is `null` until the server has asked the node for it ([`LIGHTNING.md`](LIGHTNING.md#funding-transactions)); `funding.block` is `null` only for a channel the store has not recorded yet. A closed channel has `closed: {block, txid, kind, fee}` and, after a breach, `penalty: {block, txid}`.
+`policy` is what that node charges to forward over the channel, `null` until it sent one and for a closed channel. Its `inbound_fee` is lnd's inbound fee, `{base_fee_msat, fee_rate}`, both signed (a discount is negative: `{"base_fee_msat": 0, "fee_rate": -200}`), or `null` when the node's update carries none ([`LIGHTNING.md`](LIGHTNING.md#inbound-fees)); the policies of a node's channel rows carry it the same way. `funding.txid` is `null` until the server has asked the node for it ([`LIGHTNING.md`](LIGHTNING.md#funding-transactions)); `funding.block` is `null` only for a channel the store has not recorded yet. A closed channel has `closed: {block, txid, kind, fee}` and, after a breach, `penalty: {block, txid}`.
 
 `continued_as` is the channel between the same two nodes that this one's closing transaction funded, and `continued_from` the one whose closing transaction funded this one, each `{id, scid, capacity, state}` (as `"continued_as": {"id": "811984x2037x0", "scid": "892785849701564416", "capacity": 500000000, "state": "active"}`) or `null` when we hold no such channel. That is a splice or a close that reopens in the same transaction; the chain cannot tell which, so neither is called a splice. Where one transaction funded or closed several channels between the two, the lowest id. `continued_as` is `null` while a channel is open, and `continued_from` until the server has asked the node for the funding txid.
 
@@ -927,6 +930,39 @@ GET /app/lightning/nodes/03864ef0…3f8f/channels?sort=out&state=here&q=lnd
 {"status": "open", "page": 0, "per_page": 25, "total": 2, "sort": "out", "dir": "asc",
  "states": {"active": 61, "here": 2, "peer": 0, "inactive": 0}, "channels": […]}
 ```
+
+###### Fee history
+
+What each end of an open channel charged over time, kept by the server ([`LIGHTNING.md`](LIGHTNING.md#fee-history)): the newest 50 records each way, each the fees a policy set at its channel update's own time. A record's fees are `fee_rate` (ppm), `base_fee_msat` and `inbound_fee` (`{base_fee_msat, fee_rate}`, signed, or `null`). Nothing is kept for a closed channel. Times are Unix seconds.
+
+`GET /app/lightning/channels/:id/fees` answers `node_one` and `node_two`, what each end charged, as `{from, records}`: `records` oldest first, each the fees and `time`; `from` the oldest record's time, where our record of that end starts (`null` with none). The first record of an end is where we started watching it, not a change. `watched` is `[{from, to}]`, the stretches the server was recording, oldest first, from the run in which the oldest record falls; changes made between two stretches are lost but the last, which is recorded at its own time when the server next runs, so a chart draws no line across the time between them. A channel the graph does not hold open (closed, or never synced into it) answers with no records and no stretches; one we never held is `404`.
+
+`GET /app/lightning/nodes/:key/fees?limit=` answers `{changes}`, the newest `limit` fee changes (10 by default, at most 50) on the node's open channels, either end's, newest first: each `{id, scid, peer: {id, alias}, whose, time, before, after}`, `whose` being `own` (the node's own fee moved) or `peer`, and `before` and `after` the fees either side of the change. An end's first record has no `before` and is not listed. A node with no change kept answers `{"changes": []}`; one we do not hold is `404`.
+
+```json
+GET /app/lightning/channels/913755x2933x0/fees
+{"id": "868675x206x2", "scid": "955118263271817218",
+ "node_one": {"from": 1794757351, "records": [
+   {"time": 1794757351, "fee_rate": 638, "base_fee_msat": 0, "inbound_fee": {"base_fee_msat": 0, "fee_rate": -465}}, …,
+   {"time": 1794760052, "fee_rate": 638, "base_fee_msat": 0, "inbound_fee": {"base_fee_msat": 0, "fee_rate": -468}}]},
+ "node_two": {"from": 1794754923, "records": [{"time": 1794754923, "fee_rate": 0, "base_fee_msat": 0, "inbound_fee": {"base_fee_msat": 0, "fee_rate": 0}}]},
+ "watched": [{"from": 1794758338, "to": 1794760262}]}
+GET /app/lightning/nodes/03864ef0…3f8f/fees?limit=1
+{"changes": [{"id": "913755x2933x0", "scid": "1004684247630675968", "peer": {"id": "02ad6fb8…a02b", "alias": "hashposition.com 🔵"},
+              "whose": "peer", "time": 1794758519, "before": {"fee_rate": 1000, "base_fee_msat": 0, "inbound_fee": null},
+              "after": {"fee_rate": 50, "base_fee_msat": 0, "inbound_fee": null}}]}
+```
+
+**Cost.** Measured 2026-11-15 on a copy of a 32-minute mainnet run's store (36,210 channels, 13,616 nodes) with synthetic records added for the worst cases, release build, the server's own `duration_ms` over 15 requests each, machine load about 3.4: least, median and most.
+
+| Request | ms |
+|---|---|
+| A channel's history, 51 records each way (11 KB) | 0.13, 0.15, 0.20 |
+| ACINQ (1,804 channels), 10 changes; 50 changes, each of 50 directions holding 51 records (17 KB) | 0.19, 0.22, 0.37; 0.46, 0.54, 0.67 |
+| Binance, the largest by capacity (129 channels), the same two | 0.09, 0.11, 0.17; 0.41, 0.44, 0.51 |
+| The channel answer, the ACINQ and Binance node answers and ACINQ's channel list, which now carry `inbound_fee` | 0.06 to 0.15; 0.34 to 0.52; 0.20 to 0.28; 0.20 to 0.32 |
+
+A channel's history is one range of at most 100 rows. A node's changes take its directions whose newest record is a change from memory (one hash lookup per direction: 3,600 for ACINQ), then read the newest `limit` + 1 rows of at most `limit` directions, one range each: at most 50 reads of 51 rows, whatever the node. The newest `limit` changes are all in those directions, since each other direction's newest change is older than theirs.
 
 ##### `/api/v1/lightning/…`
 
