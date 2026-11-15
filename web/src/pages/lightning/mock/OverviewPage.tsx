@@ -391,9 +391,7 @@ function OverTime(props: { period: Period }) {
   const s = () => series(props.period);
   return (
     <section id="history" class="ln-history lnm-neutral-charts" aria-labelledby="lnm-history-title">
-      <SectionHeader title="Over time" id="lnm-history-title">
-        The shipped chart, on sample data
-      </SectionHeader>
+      <SectionHeader title="Over time" id="lnm-history-title" />
       <div class="ln-chart">
         <Pending>
           <Chart
