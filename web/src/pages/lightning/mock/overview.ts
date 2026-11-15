@@ -153,6 +153,8 @@ export interface Penalty {
   one: { id: string; alias: string | null };
   two: { id: string; alias: string | null };
   capacity: number;
+  /** Sats the sweep spent (sample); 0 until set below from the capacity. */
+  swept: number;
   height: number;
   time: number;
 }
@@ -160,7 +162,7 @@ export interface Penalty {
 export function penalties(): Penalty[] {
   const r = rng(5);
   const heights = [974_019, 972_811, 970_140, 966_302, 961_955, 958_412];
-  return heights.map((h, k) => ({
+  const list: Penalty[] = heights.map((h, k) => ({
     id: k === 0 ? "958844x904x1" : `${h - r.int(2000, 40_000)}x${r.int(1, 3500)}x${r.int(0, 1)}`,
     one:
       k === 0
@@ -185,9 +187,15 @@ export function penalties(): Penalty[] {
               k === 3 ? null : `${["cobalt", "tundra", "maple", "fjord"][k % 4] ?? "x"}-ln${k}`,
           },
     capacity: k === 0 ? 1_200_000 : r.int(2, 60) * 100_000,
+    // What the sweep spent: a share of the channel, invented (sample).
+    swept: k === 0 ? 1_046_210 : 0,
     height: h,
     time: blockTime(h),
   }));
+  list.forEach((p, k) => {
+    if (p.swept === 0) p.swept = Math.round(p.capacity * (0.55 + ((k * 17) % 40) / 100));
+  });
+  return list;
 }
 
 export type FeedKind = "opened" | CloseKind | "splice";

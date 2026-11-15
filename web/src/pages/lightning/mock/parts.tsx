@@ -2,9 +2,11 @@
 // mockups' own way around, words with icons for states and close kinds, and links that stay
 // inside the mockups.
 import { useLocation } from "@solidjs/router";
-import { For, Show } from "solid-js";
+import { type Accessor, createSignal, For, onCleanup, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
+import { Hash } from "../../../components/Hash";
 import { Link } from "../../../components/Link";
+import { paths } from "../../../lib/network";
 import {
   formatRelative,
   formatUtc,
@@ -61,6 +63,20 @@ export function MockFrame(props: { children: JSX.Element }) {
   );
 }
 
+/** Whether the viewport is a phone's (DESIGN.md's 40em breakpoint), kept current. */
+export function usePhone(): Accessor<boolean> {
+  const media = window.matchMedia("(max-width: 40em)");
+  const [phone, setPhone] = createSignal(media.matches);
+  const change = () => setPhone(media.matches);
+  media.addEventListener("change", change);
+  onCleanup(() => media.removeEventListener("change", change));
+  return phone;
+}
+
+/** One value of a search parameter. */
+export const param = (v: string | string[] | undefined): string | undefined =>
+  Array.isArray(v) ? v[0] : v;
+
 /** Relative time against the moment the samples were taken, so they read the same every day. */
 export function Ago(props: { time: number; suffix?: boolean }) {
   return (
@@ -99,7 +115,8 @@ export type IconName =
   | "swap"
   | "warn"
   | "cross"
-  | "branch";
+  | "branch"
+  | "stop";
 
 /** A 14 px drawn icon in the text's colour; always beside a word that says the same. */
 export function Icon(props: { name: IconName }) {
@@ -156,13 +173,20 @@ const ICONS: Record<IconName, () => JSX.Element> = {
     </>
   ),
   branch: () => <path d="M3 3v4.5c0 2 1.5 3 3.5 3H13M10.5 8l2.5 2.5-2.5 2.5M3 13v-1" />,
+  // A closed channel: a filled square, never the pause of a disabled direction.
+  stop: () => (
+    <>
+      <circle cx="8" cy="8" r="6.5" />
+      <rect x="5.5" y="5.5" width="5" height="5" fill="currentColor" stroke="none" />
+    </>
+  ),
 };
 
 export const STATE_LABEL: Record<
   OpState,
   { word: string; short: string; icon: IconName; tone: string }
 > = {
-  active: { word: "Active", short: "Active", icon: "check", tone: "positive" },
+  active: { word: "Enabled", short: "Enabled", icon: "check", tone: "positive" },
   here: { word: "Disabled by this node", short: "Off here", icon: "pause", tone: "caution" },
   peer: {
     word: "Disabled by the peer",
@@ -170,8 +194,13 @@ export const STATE_LABEL: Record<
     icon: "pauseDashed",
     tone: "caution",
   },
-  inactive: { word: "Inactive", short: "Inactive", icon: "off", tone: "muted" },
+  inactive: { word: "No recent policy", short: "No policy", icon: "off", tone: "muted" },
+  // "No recent policy": at least one end has sent none in the last two weeks.
 };
+
+/** Said once, near the first state a page shows. */
+export const ENABLED_MEANS =
+  "Enabled means both ends advertise a forwarding policy for this channel. It is what the nodes say, not proof the channel can route a payment or has the balance to.";
 
 /** A channel's state as an icon in its status colour and a word. `short` for a phone's column. */
 export function StateTag(props: { state: OpState; short?: boolean }) {
@@ -239,9 +268,34 @@ export function PeerName(props: { peer: Peer }) {
   );
 }
 
+/** A whole number of sats, grouped, with its unit: `1 sat`, `500 000 000 sats`. */
+export function sats(n: number): string {
+  return `${groupDigits(n)} ${n === 1 ? "sat" : "sats"}`;
+}
+
+/** Millisatoshis as sats, to the msat: `1 sat`, `0.5 sat`, `−1 sat`, `20 000 000 sats`. */
+export function msatAsSats(msat: number): string {
+  const s = msat / 1000;
+  const text = Number.isInteger(s)
+    ? groupDigits(Math.abs(s))
+    : Math.abs(s).toFixed(3).replace(/0+$/, "");
+  return `${s < 0 ? "−" : ""}${text} ${Math.abs(s) === 1 ? "sat" : "sats"}`;
+}
+
+/** Whole days, the one form a column of ages takes. */
+export const days = (seconds: number): number => Math.max(0, Math.floor(seconds / 86_400));
+
+/** Whole hours, the one form a column of update ages takes. */
+export const hours = (seconds: number): number => Math.max(0, Math.floor(seconds / 3600));
+
+/** A transaction id, shortened, linked to the site's transaction page, with copy beside it. */
+export function TxLink(props: { txid: string; label: string }) {
+  return <Hash value={props.txid} href={paths.tx(props.txid)} copyLabel={props.label} />;
+}
+
 /** BTC in magnitude with its unit, for a phrase: `324.6 BTC`, `0.025 BTC`. */
-export function shortBtc(sats: number): string {
-  const btc = sats / 1e8;
+export function shortBtc(amount: number): string {
+  const btc = amount / 1e8;
   if (btc >= 1000) return `${groupDigits(Math.round(btc))} BTC`;
   if (btc >= 1) return `${btc.toFixed(btc >= 100 ? 0 : 1)} BTC`;
   return `${Number(btc.toPrecision(2))} BTC`;

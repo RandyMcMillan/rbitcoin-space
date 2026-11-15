@@ -51,7 +51,8 @@ export interface SampleChannel {
   };
   verified: number;
   closed: { kind: CloseKind; fee: number; height: number; time: number; txid: string } | null;
-  penalty: { height: number; time: number; txid: string } | null;
+  /** The revocation sweep; `swept` is the value of the outputs it spent (sample, invented). */
+  penalty: { height: number; time: number; txid: string; swept: number } | null;
   continued: string | null;
 }
 
@@ -164,6 +165,8 @@ function fromClosed(self: { id: string; alias: string | null }, c: ClosedChannel
     max_htlc_msat: c.capacity * 990,
     enabled: c.kind === "cooperative" || c.kind === "other",
     last_update: c.closedTime - r.int(3600, 6 * 86_400),
+    inbound_rate: 0,
+    inbound_base_msat: 0,
   });
   const since = Math.max(c.opened, RECORD_START);
   const mine = end(
@@ -215,6 +218,7 @@ function fromClosed(self: { id: string; alias: string | null }, c: ClosedChannel
             height: c.closedHeight + 3,
             time: blockTime(c.closedHeight + 3),
             txid: "c84e1f07a3b95d2e6f10a8c4b7e39d5a2f61c0e8b4d7a93f5e2c1b0a6d8f4e37",
+            swept: 1_046_210,
           }
         : null,
     continued: c.continued,

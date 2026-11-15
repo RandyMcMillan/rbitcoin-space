@@ -1,5 +1,4 @@
 // Mockup: every penalty this server has seen, newest first: a short table.
-import { Amount } from "../../../components/Amount";
 import { type Column, DataTable } from "../../../components/DataTable";
 import { formatDay } from "../../../components/chart/scale";
 import { SectionHeader } from "../../../components/SectionHeader";
@@ -22,12 +21,17 @@ export default function MockPenaltiesPage() {
       ),
     },
     {
-      header: "Capacity, BTC",
+      header: "Capacity, sats",
       numeric: true,
-      cell: (p) => <Amount sats={p.capacity} unit={false} short />,
+      cell: (p) => groupDigits(p.capacity),
     },
     {
-      header: "Swept",
+      header: "Swept, sats (sample)",
+      numeric: true,
+      cell: (p) => groupDigits(p.swept),
+    },
+    {
+      header: "When",
       numeric: true,
       cell: (p) => (
         <span class="ln-ends lnm-right">
@@ -43,14 +47,15 @@ export default function MockPenaltiesPage() {
         <h1>Penalties</h1>
       </header>
       <section aria-labelledby="lnm-pen-title">
-        <SectionHeader title="Seen on the chain" id="lnm-pen-title">
-          Newest first
+        <SectionHeader title="Revoked states swept" id="lnm-pen-title">
+          Seen on the chain, newest first
         </SectionHeader>
         <DataTable caption="Penalties, newest first" columns={columns} rows={penalties()} />
         <p class="ln-aside">
-          A penalty is a force close of an old, revoked state, swept by the other end with its
-          revocation key. The chain does not say which of the two nodes cheated: the keys in a
-          commitment are made for it, not the nodes' own.
+          Each row is a force close whose commitment was a revoked state: an output of it was later
+          spent with the revocation key. The chain cannot tell which of the two nodes broadcast the
+          revoked state, or why; the keys in a commitment are made for it, not the nodes' own.
+          "Swept" is the value that sweep spent.
         </p>
       </section>
     </MockFrame>

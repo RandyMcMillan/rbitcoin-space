@@ -12,6 +12,7 @@ import type {
   CloseKind,
   ListedChannel,
   NodeDetail,
+  Feature,
   RankedNode,
   Stats,
 } from "../lightning";
@@ -75,6 +76,10 @@ export interface Policy {
   max_htlc_msat: number;
   enabled: boolean;
   last_update: number;
+  /** The inbound fee: what this end takes off for a payment arriving over the channel (lnd's
+   *  inbound fee, a discount, so zero or negative). Read from an extra field of the channel update. */
+  inbound_rate: number;
+  inbound_base_msat: number;
 }
 
 /** A channel's state as an operator reads it: which end, if any, switched it off. */
@@ -135,15 +140,16 @@ export interface SampleNode {
   channels: OpenChannel[];
   closed: ClosedChannel[];
   history: HistoryPoint[];
+  features: Feature[];
 }
 
+/** What was observed: an end with no policy (none sent, or older than two weeks) is "no recent
+ *  policy", whatever the other end says; a policy that says disabled names its end. */
 export function stateOf(out: Policy | null, inn: Policy | null): OpState {
-  const o = out?.enabled === true;
-  const i = inn?.enabled === true;
-  if (o && i) return "active";
-  if (i) return "here";
-  if (o) return "peer";
-  return "inactive";
+  if (!out || !inn) return "inactive";
+  if (!out.enabled) return "here";
+  if (!inn.enabled) return "peer";
+  return "active";
 }
 
 /** The bucket a rate falls in, as the server buckets them: exact under 10, then tens, hundreds, thousands. */
@@ -233,8 +239,29 @@ function policy(
     max_htlc_msat: r.next() < 0.6 ? Math.floor(capacity * 990) : capacity * 1000,
     enabled: r.next() >= offChance,
     last_update: MOCK_NOW - (r.next() < 0.85 ? r.int(600, 2 * DAY) : r.int(2 * DAY, 13 * DAY)),
+    inbound_rate: 0,
+    inbound_base_msat: 0,
   };
 }
+
+// Inbound discounts come from their own stream, so adding them left every other sample unchanged.
+const discounts = rng(4242);
+
+/** Gives about one peer policy in eight an inbound discount, as lnd nodes that use them do. */
+function discount(p: Policy | null): Policy | null {
+  if (p && discounts.next() < 0.12) {
+    p.inbound_rate = -discounts.pick([25, 50, 100, 200]);
+    p.inbound_base_msat = discounts.pick([0, 0, -1000]);
+  }
+  return p;
+}
+
+/** A recorded policy, which predates inbound fees in our shapes: none advertised. */
+const recordedPolicy = (p: Omit<Policy, "inbound_rate" | "inbound_base_msat">): Policy => ({
+  ...p,
+  inbound_rate: 0,
+  inbound_base_msat: 0,
+});
 
 function channel(
   r: Rng,
@@ -325,7 +352,7 @@ function largeNode(): SampleNode {
     const out = policy(r, c.fee_rate, 1000, 144, c.capacity, minHtlc, 0);
     const inn =
       c.id === recordedChannel.id
-        ? (recordedChannel.node_one.policy as Policy)
+        ? recordedPolicy(recordedChannel.node_one.policy as Policy)
         : policy(
             r,
             inRates.pop() ?? 0,
@@ -335,9 +362,9 @@ function largeNode(): SampleNode {
             1000,
             0,
           );
-    const ch = channel(r, c.id, c.capacity, peer, out, inn);
+    const ch = channel(r, c.id, c.capacity, peer, out, discount(inn));
     if (c.id === recordedChannel.id && recordedChannel.node_two.policy) {
-      ch.out = recordedChannel.node_two.policy;
+      ch.out = recordedPolicy(recordedChannel.node_two.policy);
       ch.last_update = recordedChannel.last_update ?? ch.last_update;
     }
     channels.push(ch);
@@ -380,10 +407,10 @@ function largeNode(): SampleNode {
       1000,
       0.02,
     );
-    channels.push(channel(r, id, cap, peer, out, inn));
+    channels.push(channel(r, id, cap, peer, out, discount(inn)));
   }
   channels.sort((a, b) => b.capacity - a.capacity || a.height - b.height);
-  const closed = closes(r, 46, others, acinq.id);
+  const closed = closes(r, 74, others, acinq.id);
   // The splice's new channel is with the same peer as the channel it continues.
   const spliced = closed.find((c) => c.id === SPLICED);
   const into = channels.find((c) => c.id === SPLICED_INTO);
@@ -400,6 +427,7 @@ function largeNode(): SampleNode {
     channels,
     closed,
     history: past(r, channels, 11, 0.026),
+    features: acinq.features,
   };
   return acinqSample;
 }
@@ -510,6 +538,11 @@ function smallNode(): SampleNode {
           );
     if (k === 4 && inn) inn.enabled = false;
     if (k === 6 && out) out.enabled = false;
+    // It runs lnd and gives Kraken's traffic a discount coming in.
+    if (k === 1 && out) {
+      out.inbound_rate = -50;
+      out.inbound_base_msat = 0;
+    }
     return channel(r, id, cap, peers[k] ?? invent(r, k), out, inn);
   });
   channels.sort((a, b) => b.capacity - a.capacity || a.height - b.height);
@@ -556,6 +589,26 @@ function smallNode(): SampleNode {
     channels,
     closed,
     history: past(r, channels, 1, 0.12),
+    // An lnd node's usual bits, as the recorded small node announces them.
+    features: [
+      [0, "data-loss-protect", true],
+      [5, "upfront-shutdown-script", false],
+      [7, "gossip-queries", false],
+      [8, "tlv-onion", true],
+      [12, "static-remote-key", true],
+      [14, "payment-addr", true],
+      [17, "multi-path-payments", false],
+      [19, "wumbo-channels", false],
+      [23, "anchors-zero-fee-htlc-tx", false],
+      [27, "shutdown-any-segwit", false],
+      [35, "quiesce", false],
+      [39, "onion-messages", false],
+      [47, "scid-alias", false],
+    ].map(([bit, name, required]) => ({
+      bit: Number(bit),
+      name: String(name),
+      required: required === true,
+    })),
   };
   return smallSample;
 }

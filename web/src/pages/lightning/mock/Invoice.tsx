@@ -2,10 +2,8 @@
 // (the specification's "fallback address and extra routing info" example); its fields below are as
 // the specification's own breakdown gives them. A real build would decode any invoice in the page.
 import { createSignal, For, Show } from "solid-js";
-import { Amount } from "../../../components/Amount";
 import { CopyButton } from "../../../components/CopyButton";
 import { Hash } from "../../../components/Hash";
-import { SectionHeader } from "../../../components/SectionHeader";
 import { formatDay } from "../../../components/chart/scale";
 import { formatUtc, groupDigits } from "../../../lib/format";
 import { Icon, MockChannelLink, MockNodeName } from "./parts";
@@ -41,6 +39,10 @@ const DECODED = {
   ],
 };
 
+/**
+ * The overview's search field. In this mockup it reads one thing, a pasted invoice; the card
+ * appears only then, under the field. The site's own search finds nodes and channels.
+ */
 export function InvoiceSearch() {
   const [text, setText] = createSignal("");
   const clean = () =>
@@ -51,25 +53,22 @@ export function InvoiceSearch() {
   const isSample = () => clean() === SAMPLE_INVOICE;
   const looksLikeInvoice = () => /^ln(bc|tb|bcrt|tbs)\d*[munp]?1/.test(clean());
   return (
-    <section aria-labelledby="lnm-invoice-title">
-      <SectionHeader title="Read an invoice" id="lnm-invoice-title">
-        On this mockup only
-      </SectionHeader>
+    <div class="lnm-search">
       <div class="lnm-invoice__field">
         <label class="lnm-filter">
-          <span class="visually-hidden">Paste a Lightning invoice</span>
+          <span class="visually-hidden">Search, or paste a Lightning invoice to read it</span>
           <input
-            class="lnm-input mono"
+            class="lnm-input"
             type="search"
-            placeholder="Paste an invoice (lnbc…)"
+            placeholder="Search, or paste an invoice"
             spellcheck="false"
             autocomplete="off"
             value={text()}
             onInput={(e) => setText(e.currentTarget.value)}
           />
         </label>
-        <button class="btn" type="button" onClick={() => setText(SAMPLE_INVOICE)}>
-          Use the specification's example
+        <button class="btn lnm-quiet" type="button" onClick={() => setText(SAMPLE_INVOICE)}>
+          Paste the specification's example
         </button>
       </div>
       <Show when={text().trim() !== ""}>
@@ -78,15 +77,15 @@ export function InvoiceSearch() {
           fallback={
             <p class="ln-aside" role="status">
               {looksLikeInvoice()
-                ? "This mockup reads only the specification's example; the real page would decode any invoice here, in the browser, without sending it anywhere."
-                : "That is not a Lightning invoice: one starts with lnbc on mainnet."}
+                ? "This mockup reads only the specification's example; the real field would read any invoice, in the browser, without sending it anywhere."
+                : "In this mockup the field reads invoices only; the site's search in the header finds nodes and channels."}
             </p>
           }
         >
           <Card />
         </Show>
       </Show>
-    </section>
+    </div>
   );
 }
 
@@ -97,12 +96,8 @@ function Card() {
       <div class="lnm-invoice__top">
         <div>
           <p class="lnm-invoice__label">Asks for</p>
-          <p class="lnm-invoice__amount">
-            <Amount sats={DECODED.amount} />
-          </p>
-          <p class="muted num">
-            {groupDigits(DECODED.amount)} sats, on {DECODED.network}
-          </p>
+          <p class="lnm-invoice__amount num">{groupDigits(DECODED.amount)} sats</p>
+          <p class="muted num">On {DECODED.network}</p>
         </div>
         <span class="lnm-tag lnm-tag--negative">
           <Icon name="cross" />
@@ -151,6 +146,10 @@ function Card() {
         </div>
       </dl>
       <h3 class="lnm-invoice__hints">Route hints: the last hops to a private node</h3>
+      <p class="ln-aside">
+        These come from the invoice, as its maker wrote them; the public graph does not confirm
+        them, and the page looks nothing up.
+      </p>
       <ol class="lnm-hints">
         <For each={DECODED.hints}>
           {(h) => (

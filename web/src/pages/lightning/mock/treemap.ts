@@ -62,7 +62,7 @@ export const PPM_BANDS = [0, 1, 10, 50, 100, 200, 300, 500, 800, 1_000, 2_000, 5
 
 export const ppmBand = (ppm: number): number => PPM_BANDS.filter((b) => ppm >= b).length - 1;
 
-/** Age bands, youngest first; the strongest colour is the oldest channel. */
+/** Age bands, youngest first; the youngest is the strongest colour. */
 export const AGE_BANDS = [
   { upTo: 30, label: "Under 1 month" },
   { upTo: 182, label: "1 to 6 months" },
@@ -83,7 +83,12 @@ export function mix(a: string, b: string, t: number): string {
 }
 
 function parse(hex: string): [number, number, number] | null {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  // The build's minifier writes `#ffffff` as `#fff`: read both.
+  const t = hex.trim();
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(t);
+  const m = short
+    ? ["", `${short[1]}${short[1]}`, `${short[2]}${short[2]}`, `${short[3]}${short[3]}`]
+    : /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(t);
   if (!m) return null;
   return [
     Number.parseInt(m[1] ?? "0", 16),
@@ -92,6 +97,6 @@ function parse(hex: string): [number, number, number] | null {
   ];
 }
 
-/** How much of the text colour is mixed into the age colour (the ochre series) per band: the
- *  youngest is the ochre itself, which holds 3:1 on a panel; older ones step towards the text. */
-export const AGE_MIX = [0, 0.12, 0.24, 0.36, 0.48] as const;
+/** How much of the age colour (one teal, used for nothing else) each band keeps against the
+ *  panel, newest first: the newest strongest, the oldest closest to the surface, in both themes. */
+export const AGE_MIX = [1, 0.74, 0.52, 0.34, 0.2] as const;

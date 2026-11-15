@@ -1,7 +1,6 @@
 // Mockup: the panel a block's page would carry when the block opened or closed channels. One line
 // says what happened; it opens to the list. Block 975 572's three recorded opens, the rest invented.
 import { For } from "solid-js";
-import { Amount } from "../../../components/Amount";
 import { groupDigits } from "../../../lib/format";
 import { usePageTitle } from "../../../lib/page";
 import type { CloseKind } from "../lightning";
@@ -85,7 +84,7 @@ export default function MockBlockPage() {
                 <th scope="col">What</th>
                 <th scope="col">Channel and ends</th>
                 <th scope="col" class="table__num">
-                  Capacity, BTC
+                  Capacity, sats
                 </th>
               </tr>
             </thead>
@@ -110,9 +109,7 @@ export default function MockBlockPage() {
                         <MockNodeName node={x.two} />
                       </span>
                     </td>
-                    <td class="table__num">
-                      <Amount sats={x.capacity} unit={false} short />
-                    </td>
+                    <td class="table__num">{groupDigits(x.capacity)}</td>
                   </tr>
                 )}
               </For>

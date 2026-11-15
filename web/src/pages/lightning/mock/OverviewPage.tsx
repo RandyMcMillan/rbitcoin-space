@@ -42,6 +42,8 @@ const Chart = lazy(() => import("../../../components/chart/Chart"));
 const FUNDING_VB = 154;
 /** The next block's fee rate in the samples: late-2026 levels, most traffic under 1 sat/vB. */
 const NEXT_BLOCK_RATE = 0.82;
+/** A cooperative close: the funding output in, two P2WPKH outputs. */
+const COOP_VB = 169;
 
 export default function MockOverviewPage() {
   usePageTitle(() => "Mockup: Lightning");
@@ -51,10 +53,20 @@ export default function MockOverviewPage() {
   );
   return (
     <MockFrame>
-      <header class="ln-head">
+      <header class="ln-head lnm-ovhead">
         <h1>Lightning</h1>
+        <InvoiceSearch />
       </header>
-      <InvoiceSearch />
+      {/* A phone's way down a long page. */}
+      <nav class="lnm-jumps" aria-label="On this page">
+        <For each={JUMPS}>
+          {(j) => (
+            <a class="tap" href={`#${j.id}`} rel="external">
+              {j.label}
+            </a>
+          )}
+        </For>
+      </nav>
       <Totals period={period()} />
       <LiveFeed />
       <Movers period={period()} />
@@ -64,6 +76,15 @@ export default function MockOverviewPage() {
     </MockFrame>
   );
 }
+
+const JUMPS = [
+  { id: "lnm-now-title", label: "Now" },
+  { id: "lnm-feed-title", label: "As it happens" },
+  { id: "lnm-movers-title", label: "Movers" },
+  { id: "lnm-closes-title", label: "Closes" },
+  { id: "lnm-history-title", label: "Over time" },
+  { id: "lnm-top-capacity-title", label: "Top nodes" },
+];
 
 const href = (id?: string) =>
   id === undefined ? mockPaths.overview() : `${mockPaths.overview()}?period=${id}`;
@@ -139,8 +160,12 @@ function Totals(props: { period: Period }) {
         <span>
           Opening a channel now costs about{" "}
           <strong class="num">{groupDigits(Math.ceil(FUNDING_VB * NEXT_BLOCK_RATE))} sats</strong>{" "}
-          on chain: a {FUNDING_VB} vB funding transaction at the next block's{" "}
-          <FeeRate rate={NEXT_BLOCK_RATE} up />. Closing it costs about as much again.
+          on chain, for an assumed funding transaction of {FUNDING_VB} vB (one P2WPKH input, the
+          channel's P2WSH output and change) at the next block's{" "}
+          <FeeRate rate={NEXT_BLOCK_RATE} up />. A cooperative close of that channel, about{" "}
+          {COOP_VB} vB, would be about{" "}
+          <span class="num">{groupDigits(Math.ceil(COOP_VB * NEXT_BLOCK_RATE))} sats</span> at the
+          same rate, for illustration; a force close and the sweeps after it cost more, and vary.
         </span>
       </p>
       <p class="ln-aside">Only channels checked against the chain are counted.</p>
@@ -155,45 +180,51 @@ function Totals(props: { period: Period }) {
   );
 }
 
-function MoverTable(props: {
-  title: string;
-  rows: Mover[];
-  unit: "capacity" | "channels";
-  id: string;
-}) {
-  const columns: Column<Mover>[] = [
-    { header: "Node", cell: (m) => <MockNodeName node={m} /> },
+const MEASURES = [
+  { id: "capacity", label: "Capacity" },
+  { id: "channels", label: "Channels" },
+] as const;
+const DIRECTIONS = [
+  { id: "gained", label: "Gained" },
+  { id: "lost", label: "Lost" },
+  { id: "net", label: "Largest either way" },
+] as const;
+
+function Movers(props: { period: Period }) {
+  const [search, setSearch] = useSearchParams();
+  const measure = () => MEASURES.find((m) => m.id === search["measure"])?.id ?? "capacity";
+  const direction = () => DIRECTIONS.find((d) => d.id === search["moved"])?.id ?? "gained";
+  const m = () => movers(props.period);
+  const rows = (): Mover[] => {
+    const cap = measure() === "capacity";
+    const up = cap ? m().capacityUp : m().channelsUp;
+    const down = cap ? m().capacityDown : m().channelsDown;
+    if (direction() === "gained") return up;
+    if (direction() === "lost") return down;
+    return sorted([...up, ...down], (x, y) => Math.abs(y.change) - Math.abs(x.change)).slice(0, 5);
+  };
+  const a = () => arrivals(props.period);
+  const columns = (): Column<Mover>[] => [
+    { header: "Node", cell: (r) => <MockNodeName node={r} /> },
     {
-      header: props.unit === "capacity" ? "Change, BTC" : "Change",
+      header: measure() === "capacity" ? "Net change, BTC" : "Net change, channels",
       numeric: true,
-      cell: (m) => (
+      cell: (r) => (
         <span>
-          {m.change > 0 ? "+" : "−"}
-          {props.unit === "capacity"
-            ? formatBtc(Math.abs(m.change)).replace(/\.?0+$/, "")
-            : groupDigits(Math.abs(m.change))}
+          {r.change > 0 ? "+" : "−"}
+          {measure() === "capacity"
+            ? formatBtc(Math.abs(r.change)).replace(/\.?0+$/, "")
+            : groupDigits(Math.abs(r.change))}
         </span>
       ),
     },
     {
-      header: props.unit === "capacity" ? "Now, BTC" : "Now",
+      header: measure() === "capacity" ? "Now, BTC" : "Now, channels",
       numeric: true,
-      optional: true,
-      cell: (m) =>
-        props.unit === "capacity" ? <Amount sats={m.now} unit={false} short /> : groupDigits(m.now),
+      cell: (r) =>
+        measure() === "capacity" ? <Amount sats={r.now} unit={false} short /> : groupDigits(r.now),
     },
   ];
-  return (
-    <div class="lnm-mover">
-      <h3 id={props.id}>{props.title}</h3>
-      <DataTable caption={props.title} columns={columns} rows={props.rows} />
-    </div>
-  );
-}
-
-function Movers(props: { period: Period }) {
-  const m = () => movers(props.period);
-  const a = () => arrivals(props.period);
   const arrivalColumns = (
     word: string,
   ): Column<ReturnType<typeof arrivals>["newest"][number]>[] => [
@@ -201,36 +232,51 @@ function Movers(props: { period: Period }) {
     { header: word, numeric: true, cell: (n) => <Ago time={n.time} /> },
     { header: "Channels", numeric: true, optional: true, cell: (n) => groupDigits(n.channels) },
   ];
+  const pick = (
+    choices: readonly { id: string; label: string }[],
+    current: string,
+    key: string,
+  ) => (
+    <ul>
+      <For each={choices}>
+        {(c) => (
+          <li>
+            <button
+              type="button"
+              class="ln-picker__item"
+              aria-pressed={current === c.id ? "true" : "false"}
+              onClick={() => setSearch({ [key]: c.id }, { replace: true })}
+            >
+              {c.label}
+            </button>
+          </li>
+        )}
+      </For>
+    </ul>
+  );
   return (
     <section aria-labelledby="lnm-movers-title">
       <SectionHeader title="Movers" id="lnm-movers-title">
         Over {props.period.words}
       </SectionHeader>
-      <div class="lnm-movers">
-        <MoverTable
-          id="lnm-m1"
-          title="Most capacity gained"
-          rows={m().capacityUp}
-          unit="capacity"
-        />
-        <MoverTable
-          id="lnm-m2"
-          title="Most capacity lost"
-          rows={m().capacityDown}
-          unit="capacity"
-        />
-        <MoverTable
-          id="lnm-m3"
-          title="Most channels gained"
-          rows={m().channelsUp}
-          unit="channels"
-        />
-        <MoverTable
-          id="lnm-m4"
-          title="Most channels lost"
-          rows={m().channelsDown}
-          unit="channels"
-        />
+      <div class="lnm-map-controls">
+        <div class="ln-picker" role="group" aria-label="Measure">
+          {pick(MEASURES, measure(), "measure")}
+        </div>
+        <div class="ln-picker" role="group" aria-label="Which way">
+          {pick(DIRECTIONS, direction(), "moved")}
+        </div>
+      </div>
+      <p class="lnm-explain">
+        The figure is the net change over the period: what a node has now less what it had at the
+        start, so channels opened and closed within it cancel out.
+      </p>
+      <DataTable
+        caption={`Nodes by net change in ${measure()}, ${props.period.words}`}
+        columns={columns()}
+        rows={rows()}
+      />
+      <div class="lnm-movers lnm-movers--pair">
         <div class="lnm-mover">
           <h3>Newest nodes</h3>
           <DataTable
@@ -351,7 +397,7 @@ function OverTime(props: { period: Period }) {
   onSettled(() => void Chart.preload());
   const s = () => series(props.period);
   return (
-    <section id="history" class="ln-history" aria-labelledby="lnm-history-title">
+    <section id="history" class="ln-history lnm-neutral-charts" aria-labelledby="lnm-history-title">
       <SectionHeader title="Over time" id="lnm-history-title">
         The shipped chart, on sample data
       </SectionHeader>

@@ -8,6 +8,7 @@ import { formatDay } from "../../../components/chart/scale";
 import { CopyButton } from "../../../components/CopyButton";
 import { HashFull } from "../../../components/Hash";
 import { Link } from "../../../components/Link";
+import { scrollCue } from "../../../components/scrollCue";
 import { Empty } from "../../../components/States";
 import { SectionHeader } from "../../../components/SectionHeader";
 import { groupDigits } from "../../../lib/format";
@@ -19,12 +20,13 @@ import { NodeChannels } from "./NodeChannels";
 import {
   Ago,
   ColourChip,
-  duration,
+  days,
   Icon,
   KIND_LABEL,
   MockFrame,
   mockPaths,
   ordinal,
+  sats,
   shortBtc,
 } from "./parts";
 import { MOCK_NOW, type SampleNode, sampleNode, sampleNodes } from "./sample";
@@ -83,11 +85,11 @@ function Body(props: { node: SampleNode }) {
   );
   return (
     <>
-      <Header node={props.node} />
-      <Glance node={props.node} />
+      <Identity node={props.node} />
       <div class="lnm-views">
+        {/* noscroll: a section change keeps the picker where it is on screen. */}
         <nav class="ln-picker lnm-subnav" aria-label="Node sections">
-          <ul>
+          <ul ref={(el) => scrollCue(el)}>
             <For each={VIEWS}>
               {(v) => (
                 <li>
@@ -95,6 +97,7 @@ function Body(props: { node: SampleNode }) {
                     class="ln-picker__item"
                     href={`${mockPaths.node(props.node.id)}?view=${v.id}`}
                     aria-current={view() === v.id ? "page" : "false"}
+                    noscroll
                   >
                     {v.label}
                     <Show when={v.id === "channels"}>
@@ -129,63 +132,61 @@ function Body(props: { node: SampleNode }) {
           </Match>
         </Switch>
       </div>
+      <Glance node={props.node} />
+      <About node={props.node} />
     </>
   );
 }
 
-/** How fresh a node's last announcement is, as an icon in a status colour and a word. */
-function Freshness(props: { time: number }) {
-  const age = () => MOCK_NOW - props.time;
-  const f = () =>
-    age() < 86_400
-      ? { word: "Current", icon: "check" as const, tone: "positive" }
-      : age() < 7 * 86_400
-        ? { word: "Ageing", icon: "pause" as const, tone: "caution" }
-        : { word: "Stale", icon: "warn" as const, tone: "negative" };
+/** The compact identity: name, ranks and the two figures that size a node, on one or two lines. */
+function Identity(props: { node: SampleNode }) {
+  const name = () => cleanAlias(props.node.alias);
+  const capacity = () => props.node.channels.reduce((s, c) => s + c.capacity, 0);
+  const newest = () => Math.max(...props.node.channels.map((c) => c.last_update));
   return (
-    <span class={`lnm-tag lnm-tag--${f().tone}`}>
-      <Icon name={f().icon} />
-      {f().word}
-    </span>
+    <header class="lnm-ident">
+      <h1>
+        <Show when={name()} fallback={<span class="ln-alias--none">Unnamed node</span>}>
+          {(t) => <bdi class="ln-alias">{cut(t(), NAME_IN_TITLE).text}</bdi>}
+        </Show>
+      </h1>
+      <p class="lnm-ident__line">
+        <span>
+          <strong class="num">{shortBtc(capacity())}</strong>,{" "}
+          <span class="muted">{ordinal(props.node.rank.capacity)} by capacity</span>
+        </span>
+        <span>
+          <strong class="num">{groupDigits(props.node.channels.length)}</strong> open channels,{" "}
+          <span class="muted">{ordinal(props.node.rank.channels)} by channels</span>
+        </span>
+        <span class="muted">
+          Channel policies updated as recently as <Ago time={newest()} />
+        </span>
+      </p>
+    </header>
   );
 }
 
-function Header(props: { node: SampleNode }) {
-  const name = () => cleanAlias(props.node.alias);
+/** Who the node is and what it announces: below the working section, for when it is wanted. */
+function About(props: { node: SampleNode }) {
   const connect = () =>
     props.node.socket === null
       ? null
       : `${props.node.id}@${cut(cleanAlias(props.node.socket) ?? "", 128).text}`;
   return (
-    <header class="ln-identity lnm-head">
-      <div class="lnm-head__title">
-        <h1>
-          <Show when={name()} fallback={<span class="ln-alias--none">Unnamed node</span>}>
-            {(t) => <bdi class="ln-alias">{cut(t(), NAME_IN_TITLE).text}</bdi>}
-          </Show>
-        </h1>
-        <ColourChip color={props.node.color} />
-      </div>
-      <p class="lnm-rank">
-        <span>
-          <strong class="num">{ordinal(props.node.rank.capacity)}</strong> by capacity
-        </span>
-        <span>
-          <strong class="num">{ordinal(props.node.rank.channels)}</strong> by open channels
-        </span>
-        <span class="lnm-rank__fresh">
-          Last update <Ago time={props.node.last_update} />{" "}
-          <Freshness time={props.node.last_update} />
-        </span>
-      </p>
-      <dl class="lnm-ids">
-        <div>
+    <section aria-labelledby="lnm-about-title">
+      <SectionHeader title="Who it is and what it announces" id="lnm-about-title">
+        Its own announcement, updated <Ago time={props.node.last_update} />
+      </SectionHeader>
+      <dl class="ln-facts lnm-about">
+        <div class="ln-fact">
           <dt>Public key</dt>
           <dd>
             <HashFull value={props.node.id} copyLabel="Copy public key" />
+            <span class="ln-fact__sub">Its identity: any node can announce any name.</span>
           </dd>
         </div>
-        <div>
+        <div class="ln-fact">
           <dt>Connect</dt>
           <dd>
             <Show when={connect()} fallback={<span class="muted">No address announced</span>}>
@@ -198,9 +199,46 @@ function Header(props: { node: SampleNode }) {
             </Show>
           </dd>
         </div>
+        <div class="ln-fact">
+          <dt>Addresses</dt>
+          <dd>
+            <Show when={props.node.addresses.length > 0} fallback="None announced">
+              <ul class="ln-chips ln-chips--mono">
+                <For each={props.node.addresses}>
+                  {(a) => <li>{cut(cleanAlias(a) ?? "", 128).text}</li>}
+                </For>
+              </ul>
+            </Show>
+          </dd>
+        </div>
+        <div class="ln-fact">
+          <dt>Features</dt>
+          <dd>
+            <ul class="ln-chips">
+              <For each={props.node.features}>
+                {(f) => (
+                  <li>
+                    {f.name ?? `Bit ${f.bit}`}
+                    <span class="ln-chips__req">{f.required ? " (required)" : ""}</span>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </dd>
+        </div>
+        <div class="ln-fact">
+          <dt>Announced colour, the node's own choice</dt>
+          <dd>
+            <ColourChip color={props.node.color} />
+          </dd>
+        </div>
       </dl>
-      <p class="ln-aside">The public key is the node's identity: any node can announce any name.</p>
-    </header>
+      <p class="ln-aside">
+        A node re-announces itself only when something about it changes, so an old announcement is
+        normal for a node that runs quietly; its channels' policies say more about whether it is
+        working.
+      </p>
+    </section>
   );
 }
 
@@ -221,7 +259,7 @@ export function Change(props: {
   };
   return (
     <>
-      {text()} in {props.days ?? 7} days
+      {text()} in {props.days === 1 ? "1 day" : `${props.days ?? 7} days`}
     </>
   );
 }
@@ -247,6 +285,7 @@ function Glance(props: { node: SampleNode }) {
       chans().map((c) => MOCK_NOW - c.opened),
       (a, b) => a - b,
     );
+  const dayCount = (n: number) => `${groupDigits(n)} ${n === 1 ? "day" : "days"}`;
   const mid = <T,>(xs: T[]) => xs[Math.floor(xs.length / 2)];
   const kinds = () => {
     const k = { cooperative: 0, force: 0, penalty: 0, other: 0 };
@@ -261,7 +300,7 @@ function Glance(props: { node: SampleNode }) {
   return (
     <section aria-labelledby="lnm-glance-title">
       <SectionHeader title="At a glance" id="lnm-glance-title">
-        Week-on-week changes from this server's record
+        Changes over 7 days, from this server's record
       </SectionHeader>
       <dl class="ln-stats lnm-glance">
         <Stat
@@ -276,7 +315,8 @@ function Glance(props: { node: SampleNode }) {
           label="Open channels"
           sub={
             <>
-              {groupDigits(active())} active, {groupDigits(chans().length - active())} not
+              {groupDigits(active())} enabled both ways, {groupDigits(chans().length - active())}{" "}
+              not
               <br />
               <Change
                 now={chans().length}
@@ -292,21 +332,22 @@ function Glance(props: { node: SampleNode }) {
           label="Channel size, median"
           sub={
             <>
-              Largest {shortBtc(bySize().at(-1) ?? 0)}, smallest {shortBtc(bySize()[0] ?? 0)}
+              Largest {sats(bySize().at(-1) ?? 0)}, smallest {sats(bySize()[0] ?? 0)}
             </>
           }
         >
-          <Amount sats={mid(bySize()) ?? 0} short />
+          <span class="num">{sats(mid(bySize()) ?? 0)}</span>
         </Stat>
         <Stat
           label="Channel age, median"
           sub={
             <>
-              Oldest {duration(byAge().at(-1) ?? 0)}, youngest {duration(byAge()[0] ?? 0)}
+              Oldest {groupDigits(days(byAge().at(-1) ?? 0))} days, youngest{" "}
+              {dayCount(days(byAge()[0] ?? 0))}
             </>
           }
         >
-          <span class="num">{duration(mid(byAge()) ?? 0)}</span>
+          <span class="num">{groupDigits(days(mid(byAge()) ?? 0))} days</span>
         </Stat>
         <Stat
           label="Closes seen"

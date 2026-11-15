@@ -4,7 +4,7 @@ import { createSignal, For, onSettled, Show } from "solid-js";
 import { Amount } from "../../../components/Amount";
 import { SectionHeader } from "../../../components/SectionHeader";
 import { TimeAgo } from "../../../components/Time";
-import { groupDigits } from "../../../lib/format";
+import { formatUtc, groupDigits } from "../../../lib/format";
 import { feedEvents, type FeedEvent } from "./overview";
 import { Icon, type IconName, KIND_LABEL, MockChannelLink, MockNodeName } from "./parts";
 import { TIP } from "./sample";
@@ -43,7 +43,12 @@ export function LiveFeed() {
     Array.from({ length: 8 }, (_, k) => take(1, start - 6 - k * 9)[0] as Row),
   );
   const [fresh, setFresh] = createSignal(new Set<number>());
-  const [held, setHeld] = createSignal(false);
+  // Under reduced motion the list starts paused: rows arriving by themselves are motion.
+  const [held, setHeld] = createSignal(
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [waiting, setWaiting] = createSignal(0);
+  const [pausedAt, setPausedAt] = createSignal(Date.now() / 1000);
   const [hover, setHover] = createSignal(false);
   const [focus, setFocus] = createSignal(false);
   const [updates, setUpdates] = createSignal(512);
@@ -62,12 +67,17 @@ export function LiveFeed() {
         ),
       );
       if (ticks % 47 === 0) setTip((t) => t + 1);
-      if (paused()) return;
       wait -= 1;
       if (wait > 0) return;
       // One batch at most each second: one to three events, then a pause of one to three seconds.
       wait = 1 + (ticks % 3);
-      const batch = take(1 + (ticks % 5 === 0 ? 2 : ticks % 2), Date.now() / 1000);
+      const n = 1 + (ticks % 5 === 0 ? 2 : ticks % 2);
+      if (paused()) {
+        setWaiting((w) => w + n);
+        return;
+      }
+      const batch = take(n + waiting(), Date.now() / 1000);
+      setWaiting(0);
       setRows((rs) => [...batch, ...rs].slice(0, KEEP));
       setFresh(new Set(batch.map((b) => b.key)));
     }, 1000);
@@ -82,15 +92,20 @@ export function LiveFeed() {
             class={["lnm-live__dot", { "lnm-live__dot--paused": paused() }]}
             aria-hidden="true"
           />
-          {paused() ? (held() ? "Paused" : "Paused while you read") : "Live"}
+          {paused()
+            ? `Event list paused${held() ? ` at ${formatUtc(pausedAt()).replace(/^.*, /, "")}` : " while you read"}${waiting() > 0 ? `, ${waiting()} new ${waiting() === 1 ? "event" : "events"} waiting` : ""}`
+            : "Live"}
         </span>
         <button
           class="btn"
           type="button"
           aria-pressed={held() ? "true" : "false"}
-          onClick={() => setHeld((h) => !h)}
+          onClick={() => {
+            if (!held()) setPausedAt(Date.now() / 1000);
+            setHeld((h) => !h);
+          }}
         >
-          {held() ? "Resume" : "Pause"}
+          {held() ? "Resume the list" : "Pause the list"}
         </button>
       </SectionHeader>
       <dl class="lnm-server">
@@ -99,11 +114,11 @@ export function LiveFeed() {
           <dd class="num">{groupDigits(updates())}</dd>
         </div>
         <div>
-          <dt>This server</dt>
+          <dt>This server's watcher</dt>
           <dd>
             <span class="lnm-tag lnm-tag--positive">
               <Icon name="check" />
-              Synced
+              Caught up to block {groupDigits(tip())}
             </span>
           </dd>
         </div>
@@ -111,11 +126,11 @@ export function LiveFeed() {
           <dt>Gossip peers</dt>
           <dd class="num">3 of 6 connected</dd>
         </div>
-        <div>
-          <dt>Newest block read</dt>
-          <dd class="num">{groupDigits(tip())}</dd>
-        </div>
       </dl>
+      <p class="lnm-explain">
+        These figures keep updating while the event list is paused; the list holds still until you
+        resume it.
+      </p>
       <ol
         class="lnm-feed"
         aria-label="Newest changes first"
