@@ -336,6 +336,9 @@
   .lnm-right {
     align-items: flex-end;
   }
+  .lnm-under {
+    display: block;
+  }
   @media (max-width: 40em) {
     .lnm-sortpick {
       display: inline-flex;
@@ -451,16 +454,16 @@
     --sw: var(--series-2);
   }
   .lnm-age-2 {
-    --sw: color-mix(in srgb, var(--color-text) 16%, var(--series-2));
+    --sw: color-mix(in srgb, var(--color-text) 12%, var(--series-2));
   }
   .lnm-age-3 {
-    --sw: color-mix(in srgb, var(--color-text) 32%, var(--series-2));
+    --sw: color-mix(in srgb, var(--color-text) 24%, var(--series-2));
   }
   .lnm-age-4 {
-    --sw: color-mix(in srgb, var(--color-text) 48%, var(--series-2));
+    --sw: color-mix(in srgb, var(--color-text) 36%, var(--series-2));
   }
   .lnm-age-5 {
-    --sw: color-mix(in srgb, var(--color-text) 64%, var(--series-2));
+    --sw: color-mix(in srgb, var(--color-text) 48%, var(--series-2));
   }
   .lnm-fee-1 {
     --sw: var(--fee-1);

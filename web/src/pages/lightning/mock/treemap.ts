@@ -94,4 +94,4 @@ function parse(hex: string): [number, number, number] | null {
 
 /** How much of the text colour is mixed into the age colour (the ochre series) per band: the
  *  youngest is the ochre itself, which holds 3:1 on a panel; older ones step towards the text. */
-export const AGE_MIX = [0, 0.16, 0.32, 0.48, 0.64] as const;
+export const AGE_MIX = [0, 0.12, 0.24, 0.36, 0.48] as const;
