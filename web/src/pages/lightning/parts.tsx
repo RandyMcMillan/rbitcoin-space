@@ -25,6 +25,7 @@ import {
   KIND_TAG,
   msat,
   LONG_FIGURE,
+  LONGER_FIGURE,
   msatAsBtc,
   msatAsSats,
   NAME_IN_LIST,
@@ -230,7 +231,7 @@ export function ChannelLink(props: { id: string }) {
   );
 }
 
-/** A 14 px drawn icon in its tag's tone; always beside a word that says the same. */
+/** A drawn icon the size of its text, in its tag's tone; always beside a word that says the same. */
 export function Icon(props: { name: IconName }) {
   return (
     <svg class="ln-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -250,6 +251,13 @@ const ICONS: Record<IconName, () => JSX.Element> = {
   pause: () => (
     <>
       <circle cx="8" cy="8" r="6.5" />
+      <path d="M6.5 5.5v5M9.5 5.5v5" />
+    </>
+  ),
+  // The peer's end paused: the same pause, its ring dashed, so the two read apart without colour.
+  pauseDashed: () => (
+    <>
+      <circle cx="8" cy="8" r="6.5" stroke-dasharray="2.6 1.8" />
       <path d="M6.5 5.5v5M9.5 5.5v5" />
     </>
   ),
@@ -458,12 +466,28 @@ export function MsatFig(props: { msat: number | bigint; sign?: string }) {
   );
 }
 
-/** A figure in two forms: `exact`, and where that is long, `short` for the narrowest room. */
-export function Fig(props: { exact: string; short: string }) {
-  const long = () => props.exact.length > LONG_FIGURE;
+/**
+ * A figure in two forms: `exact`, and where that is long, `short` for the narrowest room. One
+ * past `LONGER_FIGURE` is marked too, for rooms that switch only those.
+ */
+export function Fig(props: { exact: string; short: string; unit?: string }) {
+  // With `unit`, the exact form is the figure and its unit in a span of its own, for a room that
+  // sets the unit smaller (a node's card); one piece all the same.
+  const length = () => props.exact.length + (props.unit === undefined ? 0 : props.unit.length + 1);
+  const long = () => length() > LONG_FIGURE;
   return (
-    <span class={["num", { "ln-fig--long": long() }]}>
-      <span class="ln-fig__exact">{props.exact}</span>
+    <span class={["num", { "ln-fig--long": long(), "ln-fig--longer": length() > LONGER_FIGURE }]}>
+      <span class="ln-fig__exact">
+        {props.exact}
+        <Show when={props.unit}>
+          {(u) => (
+            <>
+              {" "}
+              <span class="ln-fig__unit">{u()}</span>
+            </>
+          )}
+        </Show>
+      </span>
       <Show when={long()}>
         <span class="ln-fig__short">{props.short}</span>
       </Show>

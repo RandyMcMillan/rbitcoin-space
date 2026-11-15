@@ -817,6 +817,14 @@ mod operators {
         assert_eq!(list("fee=in:none").0, [5]);
         assert_eq!(list("fee=in:1&state=here&q=kraken").0, [2]);
         assert_eq!(list("fee=in:1&state=active").0, Vec::<u64>::new());
+        // A run of bars, as the page groups them into rows: every rate between, no policy apart.
+        assert_eq!(list("fee=out:100-100").0, [1, 4]);
+        let priced: Vec<u64> = list("")
+            .0
+            .into_iter()
+            .filter(|c| ![5, 3].contains(c))
+            .collect();
+        assert_eq!(list("fee=out:0-4294967000").0, priced);
         // A page past the end: empty, with the total.
         let p = open_page(&i, n, &OpenQuery::default(), 4_000);
         assert_eq!(
@@ -852,6 +860,11 @@ mod operators {
             "fee=up:100",
             "fee=out",
             "fee=out:4294967296",
+            "fee=out:40-10",
+            "fee=out:10-15",
+            "fee=out:10-",
+            "fee=out:none-10",
+            "fee=out:1-2-3",
             "peer=03",
             "q=",
             "q=+++",
@@ -1006,6 +1019,9 @@ mod operators {
             serde_json::json!({"median": 100, "weighted": 200, "lowest": 100, "highest": 500, "policies": 3})
         );
         assert_eq!(one["fee_rates"]["incoming"]["policies"], 4);
+        // The newest policy either way over its channels: its peer's on c2.
+        assert_eq!(one["last_policy_update"], U + 9);
+        assert_eq!(f(4)["last_policy_update"], U + 3);
         // One channel, no funding time stored, and no policy toward it.
         let four = f(4);
         assert_eq!(
@@ -1032,5 +1048,6 @@ mod operators {
             six["states"],
             serde_json::json!({"active": 0, "here": 0, "peer": 0, "inactive": 1})
         );
+        assert_eq!(six["last_policy_update"], serde_json::Value::Null);
     }
 }

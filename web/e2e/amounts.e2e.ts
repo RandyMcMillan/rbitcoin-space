@@ -355,6 +355,8 @@ const COPIED: [RegExp, RegExp][] = [
   [/channel id as one number$/, /^\d+$/],
   [/channel id in lnd's form$/, /^\d+:\d+:\d+$/],
   [/hex$|^Copy item \d+$/, /^(?:[0-9a-f]{2})+$/],
+  // A node's key at its first announced address, as a wallet takes it to connect.
+  [/connect string$/, /^0[23][0-9a-f]{64}@\S+$/],
 ];
 
 /** Records what the page hands the clipboard, in place of the clipboard itself. */
