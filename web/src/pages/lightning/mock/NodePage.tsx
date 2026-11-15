@@ -1,0 +1,339 @@
+// Mockup: a Lightning node page for operators. Header, the node at a glance, then one section at a
+// time chosen by a row of links whose choice is in the address (`?view=`).
+import { sorted } from "../../../components/chart/geometry";
+import { useParams, useSearchParams } from "@solidjs/router";
+import { createMemo, For, lazy, Loading as Pending, Match, Show, Switch } from "solid-js";
+import { Amount } from "../../../components/Amount";
+import { formatDay } from "../../../components/chart/scale";
+import { CopyButton } from "../../../components/CopyButton";
+import { HashFull } from "../../../components/Hash";
+import { Link } from "../../../components/Link";
+import { Empty } from "../../../components/States";
+import { SectionHeader } from "../../../components/SectionHeader";
+import { groupDigits } from "../../../lib/format";
+import { usePageTitle } from "../../../lib/page";
+import { cleanAlias, cut, NAME_IN_TITLE } from "../lightning";
+import { Stat } from "../parts";
+import { NodeClosed, NodeFees, NodeHistory } from "./NodeSections";
+import { NodeChannels } from "./NodeChannels";
+import {
+  Ago,
+  ColourChip,
+  duration,
+  Icon,
+  KIND_LABEL,
+  MockFrame,
+  mockPaths,
+  ordinal,
+  shortBtc,
+} from "./parts";
+import { MOCK_NOW, type SampleNode, sampleNode, sampleNodes } from "./sample";
+
+const NodeMap = lazy(() => import("./NodeMap"));
+
+export const VIEWS = [
+  { id: "channels", label: "Channels" },
+  { id: "map", label: "Map" },
+  { id: "closed", label: "Closed" },
+  { id: "fees", label: "Fees" },
+  { id: "history", label: "History" },
+] as const;
+export type View = (typeof VIEWS)[number]["id"];
+
+export default function MockNodePage() {
+  const params = useParams<{ key: string }>();
+  const node = createMemo(() => sampleNode(params.key ?? ""));
+  return (
+    <MockFrame>
+      <Show
+        when={node()}
+        fallback={
+          <>
+            <h1>Lightning node</h1>
+            <Empty title="Not one of the sample nodes">
+              These mockups hold two nodes:{" "}
+              <For each={sampleNodes()}>
+                {(n, i) => (
+                  <>
+                    {i() > 0 ? " and " : ""}
+                    <Link href={mockPaths.node(n.id)}>{n.alias ?? "No name"}</Link>
+                  </>
+                )}
+              </For>
+              . On the real site this is the page for a node the server does not hold.
+            </Empty>
+          </>
+        }
+      >
+        {(n) => <Body node={n()} />}
+      </Show>
+    </MockFrame>
+  );
+}
+
+function Body(props: { node: SampleNode }) {
+  const [search] = useSearchParams();
+  const view = (): View => {
+    const v = search["view"];
+    return VIEWS.find((x) => x.id === v)?.id ?? "channels";
+  };
+  const name = () => cleanAlias(props.node.alias);
+  usePageTitle(
+    () => `Mockup: node ${cut(name() ?? props.node.id.slice(0, 20), NAME_IN_TITLE).text}`,
+  );
+  return (
+    <>
+      <Header node={props.node} />
+      <Glance node={props.node} />
+      <div class="lnm-views">
+        <nav class="ln-picker lnm-subnav" aria-label="Node sections">
+          <ul>
+            <For each={VIEWS}>
+              {(v) => (
+                <li>
+                  <Link
+                    class="ln-picker__item"
+                    href={`${mockPaths.node(props.node.id)}?view=${v.id}`}
+                    aria-current={view() === v.id ? "page" : "false"}
+                  >
+                    {v.label}
+                    <Show when={v.id === "channels"}>
+                      <span class="lnm-count num">{groupDigits(props.node.channels.length)}</span>
+                    </Show>
+                    <Show when={v.id === "closed"}>
+                      <span class="lnm-count num">{groupDigits(props.node.closed.length)}</span>
+                    </Show>
+                  </Link>
+                </li>
+              )}
+            </For>
+          </ul>
+        </nav>
+        <Switch>
+          <Match when={view() === "channels"}>
+            <NodeChannels node={props.node} />
+          </Match>
+          <Match when={view() === "map"}>
+            <Pending fallback={<div class="lnm-map-hold" />}>
+              <NodeMap node={props.node} />
+            </Pending>
+          </Match>
+          <Match when={view() === "closed"}>
+            <NodeClosed node={props.node} />
+          </Match>
+          <Match when={view() === "fees"}>
+            <NodeFees node={props.node} />
+          </Match>
+          <Match when={view() === "history"}>
+            <NodeHistory node={props.node} />
+          </Match>
+        </Switch>
+      </div>
+    </>
+  );
+}
+
+/** How fresh a node's last announcement is, as an icon in a status colour and a word. */
+function Freshness(props: { time: number }) {
+  const age = () => MOCK_NOW - props.time;
+  const f = () =>
+    age() < 86_400
+      ? { word: "Current", icon: "check" as const, tone: "positive" }
+      : age() < 7 * 86_400
+        ? { word: "Ageing", icon: "pause" as const, tone: "caution" }
+        : { word: "Stale", icon: "warn" as const, tone: "negative" };
+  return (
+    <span class={`lnm-tag lnm-tag--${f().tone}`}>
+      <Icon name={f().icon} />
+      {f().word}
+    </span>
+  );
+}
+
+function Header(props: { node: SampleNode }) {
+  const name = () => cleanAlias(props.node.alias);
+  const connect = () =>
+    props.node.socket === null
+      ? null
+      : `${props.node.id}@${cut(cleanAlias(props.node.socket) ?? "", 128).text}`;
+  return (
+    <header class="ln-identity lnm-head">
+      <div class="lnm-head__title">
+        <h1>
+          <Show when={name()} fallback={<span class="ln-alias--none">Unnamed node</span>}>
+            {(t) => <bdi class="ln-alias">{cut(t(), NAME_IN_TITLE).text}</bdi>}
+          </Show>
+        </h1>
+        <ColourChip color={props.node.color} />
+      </div>
+      <p class="lnm-rank">
+        <span>
+          <strong class="num">{ordinal(props.node.rank.capacity)}</strong> by capacity
+        </span>
+        <span>
+          <strong class="num">{ordinal(props.node.rank.channels)}</strong> by open channels
+        </span>
+        <span class="lnm-rank__fresh">
+          Last update <Ago time={props.node.last_update} />{" "}
+          <Freshness time={props.node.last_update} />
+        </span>
+      </p>
+      <dl class="lnm-ids">
+        <div>
+          <dt>Public key</dt>
+          <dd>
+            <HashFull value={props.node.id} copyLabel="Copy public key" />
+          </dd>
+        </div>
+        <div>
+          <dt>Connect</dt>
+          <dd>
+            <Show when={connect()} fallback={<span class="muted">No address announced</span>}>
+              {(c) => (
+                <span class="lnm-connect">
+                  <span class="mono lnm-connect__text">{c()}</span>
+                  <CopyButton value={c()} label="Copy the connect string" />
+                </span>
+              )}
+            </Show>
+          </dd>
+        </div>
+      </dl>
+      <p class="ln-aside">The public key is the node's identity: any node can announce any name.</p>
+    </header>
+  );
+}
+
+/** "Up 7.1 BTC (2.6%)", "Down 3", "No change": an arrow and a word, never a colour. */
+export function Change(props: {
+  now: number;
+  then: number;
+  format: (n: number) => string;
+  days?: number;
+}) {
+  const d = () => props.now - props.then;
+  const share = () => (props.then === 0 ? null : (d() / props.then) * 100);
+  const text = () => {
+    if (d() === 0) return "No change";
+    const s = share();
+    const pct = s === null ? "" : ` (${Math.abs(s) < 0.1 ? "<0.1" : Math.abs(s).toFixed(1)}%)`;
+    return `${d() > 0 ? "↑ Up" : "↓ Down"} ${props.format(Math.abs(d()))}${pct}`;
+  };
+  return (
+    <>
+      {text()} in {props.days ?? 7} days
+    </>
+  );
+}
+
+function Glance(props: { node: SampleNode }) {
+  const chans = () => props.node.channels;
+  const capacity = () => chans().reduce((s, c) => s + c.capacity, 0);
+  const weekAgo = () => {
+    const h = props.node.history;
+    const t = MOCK_NOW - 7 * 86_400;
+    let last = h[0];
+    for (const p of h) if (p.time <= t) last = p;
+    return last;
+  };
+  const active = () => chans().filter((c) => c.state === "active").length;
+  const bySize = () =>
+    sorted(
+      chans().map((c) => c.capacity),
+      (a, b) => a - b,
+    );
+  const byAge = () =>
+    sorted(
+      chans().map((c) => MOCK_NOW - c.opened),
+      (a, b) => a - b,
+    );
+  const mid = <T,>(xs: T[]) => xs[Math.floor(xs.length / 2)];
+  const kinds = () => {
+    const k = { cooperative: 0, force: 0, penalty: 0, other: 0 };
+    for (const c of props.node.closed) k[c.kind] += 1;
+    return k;
+  };
+  const forced = () => {
+    const k = kinds();
+    const total = props.node.closed.length;
+    return total === 0 ? null : Math.round(((k.force + k.penalty) / total) * 100);
+  };
+  return (
+    <section aria-labelledby="lnm-glance-title">
+      <SectionHeader title="At a glance" id="lnm-glance-title">
+        Week-on-week changes from this server's record
+      </SectionHeader>
+      <dl class="ln-stats lnm-glance">
+        <Stat
+          label="Capacity"
+          sub={
+            <Change now={capacity()} then={weekAgo()?.capacity ?? capacity()} format={shortBtc} />
+          }
+        >
+          <Amount sats={capacity()} short />
+        </Stat>
+        <Stat
+          label="Open channels"
+          sub={
+            <>
+              {groupDigits(active())} active, {groupDigits(chans().length - active())} not
+              <br />
+              <Change
+                now={chans().length}
+                then={weekAgo()?.channels ?? chans().length}
+                format={groupDigits}
+              />
+            </>
+          }
+        >
+          <span class="num">{groupDigits(chans().length)}</span>
+        </Stat>
+        <Stat
+          label="Channel size, median"
+          sub={
+            <>
+              Largest {shortBtc(bySize().at(-1) ?? 0)}, smallest {shortBtc(bySize()[0] ?? 0)}
+            </>
+          }
+        >
+          <Amount sats={mid(bySize()) ?? 0} short />
+        </Stat>
+        <Stat
+          label="Channel age, median"
+          sub={
+            <>
+              Oldest {duration(byAge().at(-1) ?? 0)}, youngest {duration(byAge()[0] ?? 0)}
+            </>
+          }
+        >
+          <span class="num">{duration(mid(byAge()) ?? 0)}</span>
+        </Stat>
+        <Stat
+          label="Closes seen"
+          sub={
+            <Show when={forced() !== null} fallback="None since this server started">
+              {forced()}% forced
+              <span class="lnm-kinds">
+                <For each={["cooperative", "force", "penalty", "other"] as const}>
+                  {(k) => (
+                    <Show when={kinds()[k] > 0}>
+                      <span class={`lnm-tag lnm-tag--${KIND_LABEL[k].tone}`}>
+                        <Icon name={KIND_LABEL[k].icon} />
+                        {groupDigits(kinds()[k])} {KIND_LABEL[k].word.toLowerCase()}
+                      </span>
+                    </Show>
+                  )}
+                </For>
+              </span>
+            </Show>
+          }
+        >
+          <span class="num">{groupDigits(props.node.closed.length)}</span>
+        </Stat>
+        <Stat label="First seen" sub="Its oldest funding block this server holds">
+          <span class="num">{formatDay(props.node.first_seen)}</span>
+        </Stat>
+      </dl>
+    </section>
+  );
+}
