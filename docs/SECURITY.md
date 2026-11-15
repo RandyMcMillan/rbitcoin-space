@@ -21,9 +21,9 @@ The server sits between the public internet and a Bitcoin node. A client must ne
 
 1. **Clients never choose where the server connects.** Upstream addresses come from configuration only. No request parameter is ever used as a host, port, URL or socket path.
 2. **Every parameter is parsed into a strict type before any upstream call:** a txid is 64 hex characters, a height is a `u32`, an address is parsed for the configured network. Raw client strings are never spliced into an upstream path or RPC call.
-3. **Routes are an allow-list.** The Esplora pass-through forwards only named routes. There is no generic proxy and no path forwarding.
+3. **Routes are an allow-list.** The Esplora pass-through forwards only named routes. The maintainer-approved BlindBit v1 routes are also named explicitly, with typed heights and dust limits ([`API.md`](API.md#blindbit-v1-silent-payments)); this does not allow arbitrary `/blindbit/*` paths. There is no generic proxy and no path forwarding.
 4. **RPC is called with a fixed set of read-only methods.** Credentials never leave the server and never appear in a response, log line or error.
-5. **Broadcast is the only write.** It is size-capped, rate-limited, and can be switched off.
+5. **Broadcast is the only write.** It is size-capped, rate-limited, and can be switched off. BlindBit `POST /api/blindbit/v1/forward-tx` is the same broadcast operation as `POST /api/tx` and shares its switch, rate budget and transaction size cap.
 
 ### Bounding work
 

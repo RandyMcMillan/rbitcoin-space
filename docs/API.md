@@ -34,6 +34,41 @@ Request and response shapes are rbitcoin v0.9.2's: [`docs/esplora-openapi.yaml`]
 
 `HEAD` is accepted wherever `GET` is. Any other path under `/api` is a `404`, and a known path with the wrong method is a `405` with `Allow`.
 
+### BlindBit v1 silent payments
+
+The maintainer-approved BlindBit v1 surface is allowed through at `/api/blindbit/v1`
+(and each network's API prefix), using rbitcoin v0.9.2's
+[`BlindBit handlers`](https://github.com/rbitcoin-org/rbitcoin/blob/v0.9.2/crates/rbitcoin-esplora/src/blindbit.rs).
+Point a BlindBit client at this prefix. The upstream node must enable `--sp-tweaks`;
+the backend does not enable or build the index. Unindexed heights return `404`,
+and no indexed height returns `503` on the info and block-height routes.
+
+| Method | Path relative to `/api/blindbit/v1` | Parameters |
+|---|---|---|
+| GET, HEAD | `/info`, `/block-height` | None |
+| GET, HEAD | `/block-hash/:height` | Decimal `u32` height |
+| GET, HEAD | `/tweaks/:height`, `/tweak-index/:height` | Decimal `u32` height, optional `?dustLimit=` decimal `u64` satoshis |
+| GET, HEAD | `/utxos/:height`, `/spent-index/:height` | Decimal `u32` height |
+| GET, HEAD | `/filter/new-utxos/:height`, `/filter/spent/:height` | Decimal `u32` height |
+| POST | `/forward-tx` | JSON `{"data":"<raw transaction hex>"}`; no other fields |
+
+Only these named routes are allowed. Unknown or repeated query parameters are
+`400`; unknown paths are `404`; wrong methods are `405`. Parameters are rebuilt
+in canonical decimal form. Successful response bytes and content types are the
+node's; errors are sanitized as below. Reads use `public, max-age=1`, including
+height-keyed answers because reorgs and later spends can change them. Identical
+reads share an upstream call. Every route reads one block's worth of index, so
+they have the ordinary per-client limits, not the address routes' cost limit.
+Measured on a synced mainnet node: a few milliseconds each once cached; the
+slowest uncached answer took 2.7 s (`filter/spent`, four scans at once).
+
+`/forward-tx` is transaction broadcast: it shares `BROADCAST_ENABLED`, the
+per-network per-client broadcast rate limit and the 400,000-byte decoded
+transaction cap with `POST /api/tx`. Its JSON body has the same 800,016-byte cap
+as that route. The node receives rebuilt JSON containing canonical transaction
+hex and returns a JSON txid string; responses use `no-store`. This does not
+permit package relay or any other write.
+
 ### Not served
 
 | Route | Why |
@@ -42,7 +77,6 @@ Request and response shapes are rbitcoin v0.9.2's: [`docs/esplora-openapi.yaml`]
 | `POST /addresses/txs`, `POST /scripthashes/txs` and their `/summary` | One request can ask for up to 300 address-index joins. That is unbounded load for one client to cause (rule 11). Ask per address instead |
 | `POST /txs/test`, `POST /txs/package` | Broadcast is the only write we serve (rule 5). Package relay and test-accept may come later with their own limits |
 | `GET /block-template` | Off on the node by default, about 5 MB, and the server uses RPC for templates |
-| `/blindbit/v1/*` | Silent-payments oracle; not part of the Esplora surface |
 
 ## Differences from the node
 
@@ -209,7 +243,7 @@ Once a kept address's whole history is in the store, `/api/address/:a/txs`, `/tx
 
 ## Broadcast
 
-`POST /tx` with the raw transaction as hex in the body, optionally surrounded by whitespace. The answer is the txid as `text/plain`.
+`POST /tx` with the raw transaction as hex in the body, optionally surrounded by whitespace. The answer is the txid as `text/plain`. BlindBit [`POST /blindbit/v1/forward-tx`](#blindbit-v1-silent-payments) offers the same operation with JSON request and response bodies and shares all the limits below.
 
 - **Parsed before sending:** the body must decode as exactly one transaction. The node is sent our own serialization of it, never the client's bytes.
 - **Size cap:** 400,000 bytes of transaction (800,000 hex characters), the most a standard transaction can be. Larger is `413`.
