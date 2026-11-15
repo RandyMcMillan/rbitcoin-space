@@ -1,12 +1,11 @@
 // Mockup: the network as it changes, a canned loop. Rows arrive at the top, at most one batch a
 // second, about 30 kept; paused by the button, or while the pointer or focus is in the list.
 import { createSignal, For, onSettled, Show } from "solid-js";
-import { Amount } from "../../../components/Amount";
 import { SectionHeader } from "../../../components/SectionHeader";
 import { TimeAgo } from "../../../components/Time";
 import { formatUtc, groupDigits } from "../../../lib/format";
 import { feedEvents, type FeedEvent } from "./overview";
-import { Icon, type IconName, KIND_LABEL, MockChannelLink, MockNodeName } from "./parts";
+import { Icon, type IconName, KIND_LABEL, MockChannelLink, MockNodeName, sats } from "./parts";
 import { TIP } from "./sample";
 
 const KEEP = 30;
@@ -162,7 +161,7 @@ export function LiveFeed() {
                   </Show>
                 </span>
                 <span class="lnm-feed__cap">
-                  <Amount sats={row.event.capacity} short />
+                  <span class="num">{sats(row.event.capacity)}</span>
                 </span>
                 <span class="lnm-feed__ends">
                   <MockNodeName node={row.event.one} />

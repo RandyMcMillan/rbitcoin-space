@@ -917,7 +917,7 @@
   }
   .lnm-feed__row {
     display: grid;
-    grid-template-columns: 11.5rem 9.5rem 6rem minmax(0, 1fr) 6rem;
+    grid-template-columns: 11.5rem 9.5rem 8.5rem minmax(0, 1fr) 6rem;
     align-items: center;
     gap: var(--space-1) var(--space-4);
     padding: var(--space-2) 0;
@@ -1424,7 +1424,16 @@
     min-width: 0;
     overflow-wrap: anywhere;
   }
+  .lnm-idforms .lnm-connect {
+    min-width: 0;
+  }
+  .lnm-idforms .mono {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
   .lnm-closedtag {
+    white-space: normal;
+    min-width: 0;
     padding: 0 var(--space-3);
     border: 1px dashed var(--color-line-strong);
     border-radius: var(--radius-pill);
@@ -1554,5 +1563,28 @@
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
+  }
+
+  /* Let a shortened id give way at a large text size, as the shared hash does in a narrow column. */
+  .lnm-outcome > *,
+  .lnm-outcome__item > *,
+  .lnm-step__body > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+  /* With large text, a shortened id keeps its whole tail and its copy button goes under it. */
+  .lnm-outcome .hash,
+  .lnm-step__body .hash,
+  .lnm-card__list .hash {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  @media (max-width: 40em) {
+    .lnm-step {
+      padding-left: calc(28px + var(--space-3));
+    }
+    .lnm-outcome__item {
+      padding-left: var(--space-3);
+    }
   }
 }
