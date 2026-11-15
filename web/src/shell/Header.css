@@ -282,6 +282,14 @@
       display: block;
     }
   }
+  /* A phone at a large text size (320 px at 20 px text and up): two names to a row, before four
+     would leave the wider Linux fonts less than a few pixels. A page zoomed to 150% (16.75em)
+     keeps one row. */
+  @media (max-width: 16.5em) {
+    .nav {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
   /* A short screen (a phone on its side, a page zoomed in or in a large text size): the header
      stays at the top of the page rather than covering a share of every screen. */
   @media (max-height: 30em) {
