@@ -1,0 +1,476 @@
+/* MOCKUP (GG5), never merged. */
+@layer pages {
+  /* ---- Mock chrome ---- */
+  .ggm-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-4);
+    font-size: var(--text-sm);
+  }
+  .ggm-nav__tag {
+    padding: 0 var(--space-2);
+    border: 1.5px dashed var(--color-caution);
+    border-radius: var(--radius-pill);
+    color: var(--color-caution);
+    font-weight: var(--weight-bold);
+  }
+  .ggm-nav__link {
+    color: var(--color-text-muted);
+  }
+  .ggm-nav__link[aria-current="page"] {
+    color: var(--color-text);
+    text-decoration: none;
+    font-weight: var(--weight-medium);
+  }
+
+  /* ---- Block page ---- */
+  .ggm {
+    display: grid;
+    gap: var(--space-5);
+    padding-top: var(--space-5);
+    padding-bottom: var(--space-8);
+  }
+  .ggm-title {
+    font-size: var(--text-3xl);
+  }
+  .ggm-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+  .ggm-facts dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .ggm-facts dt {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+  .ggm-facts dd {
+    font-size: var(--text-lg);
+  }
+  .ggm-core {
+    position: relative;
+  }
+  .ggm-frame {
+    position: relative;
+    aspect-ratio: 6 / 5;
+    border-radius: var(--radius-l);
+    background: var(--color-surface-sunken);
+    box-shadow: inset 0 0 0 1px var(--color-line);
+  }
+  .ggm-grid {
+    position: absolute;
+    inset: var(--space-2);
+  }
+  .ggm-caption {
+    margin-top: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+  .ggm-core .feekey {
+    margin-top: var(--space-3);
+  }
+  @media (max-width: 64.99em) {
+    .ggm-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    /* Room below, so the map can come up under the header while the sheet is open. */
+    .ggm:has(.gg--open:not(.gg--inline)),
+    .ggm-strip:has(.gg--open:not(.gg--inline)) {
+      padding-bottom: 60dvh;
+    }
+  }
+
+  /* ---- Home strip ---- */
+  .ggm-strip {
+    padding: var(--space-5) 0;
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-surface-sunken);
+  }
+  .ggm-strip__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-3) var(--space-5);
+    margin-top: var(--space-4);
+  }
+  .ggm-strip__title {
+    font-size: var(--text-xl);
+    line-height: 2rem;
+  }
+  .ggm-strip__head .gg {
+    flex: 1 1 18rem;
+    margin-top: 0;
+  }
+  .ggm-strip__track {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--tile-gap);
+    margin-top: var(--space-4);
+    overflow-x: auto;
+    padding-bottom: var(--space-2);
+  }
+  .ggm-tile {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--tile-w);
+    height: var(--tile-h);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-m);
+    background: var(--color-surface);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+  .ggm-tile--next {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    place-items: stretch;
+    gap: var(--space-1);
+    width: 16rem;
+    height: 15rem;
+    padding: var(--space-2);
+    border: 1.5px dashed var(--color-line-strong);
+    background: none;
+  }
+  .ggm-tile__title {
+    color: var(--color-text);
+    font-weight: var(--weight-medium);
+  }
+  .ggm-tile__grid {
+    position: relative;
+  }
+  .ggm-tile__foot {
+    font-size: var(--text-xs);
+  }
+  .ggm-now {
+    flex: none;
+    align-self: stretch;
+    width: 0;
+    border-left: 1.5px dashed var(--color-line-strong);
+  }
+
+  /* ---- The goggles ---- */
+  .gg {
+    position: relative;
+    margin-top: var(--space-3);
+  }
+  .gg__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+  }
+  .gg__icon {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+  .gg__toggle[aria-expanded="true"] {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
+  .gg__picked {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+    list-style: none;
+  }
+  .gg__picked li {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .gg__join {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+  .gg__tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 0 10px 0 12px;
+    border: 1px solid var(--color-accent);
+    border-radius: var(--radius-pill);
+    background: var(--color-accent-soft);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    animation: gg-in var(--dur-base) var(--ease-settle);
+  }
+  .gg__x {
+    width: 10px;
+    height: 10px;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+  }
+  .gg__result {
+    margin-left: auto;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+  .gg__result:empty {
+    display: none;
+  }
+  .gg__result--none {
+    color: var(--color-text-muted);
+  }
+
+  /* The panel: a sheet from the bottom on narrow screens. */
+  .gg__panel {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: var(--z-toast);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    max-width: 40rem;
+    /* About half a phone; more at a large text size, where the head alone is taller. */
+    max-height: min(85dvh, max(52dvh, 22rem));
+    margin-inline: auto;
+    border: 1px solid var(--color-line);
+    border-bottom: 0;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    background: var(--color-surface-raised);
+    box-shadow: var(--shadow-pop);
+    opacity: 0;
+    transform: translateY(100%);
+    visibility: hidden;
+    transition:
+      transform var(--dur-base) var(--ease-out),
+      opacity var(--dur-fade) linear,
+      visibility 0s linear var(--dur-base);
+  }
+  .gg--open .gg__panel {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    transition:
+      transform var(--dur-base) var(--ease-out),
+      opacity var(--dur-fade) linear;
+  }
+  .gg__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-line);
+  }
+  .gg__now {
+    flex: 1 1 100%;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+  }
+  .gg__mode {
+    display: inline-flex;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-m);
+    overflow: hidden;
+  }
+  .gg__mode button,
+  .gg__clear,
+  .gg__more {
+    border: 0;
+    background: none;
+    color: inherit;
+  }
+  .gg__done {
+    margin-left: auto;
+  }
+  .gg__mode button {
+    min-height: 32px;
+    padding: 0 var(--space-3);
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+  .gg__mode button + button {
+    border-left: 1px solid var(--color-line-strong);
+  }
+  .gg__mode [aria-pressed="true"] {
+    background: var(--color-accent-soft);
+    font-weight: var(--weight-medium);
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+  }
+  .gg__clear {
+    min-height: 32px;
+    padding: 0 var(--space-2);
+    font-size: var(--text-sm);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .gg__body {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .gg__group-name {
+    display: block;
+    margin-bottom: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  .gg__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  /* A kind: its name and its share of the block, the share also a wash across the chip, so a kind
+     that matches everything or nothing shows before it is picked. */
+  .gg__chip {
+    --gg-wash: color-mix(in srgb, var(--color-line-strong) 24%, var(--color-surface-raised));
+    --gg-ground: var(--color-surface-raised);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-pill);
+    background: linear-gradient(
+      to right,
+      var(--gg-wash) calc(var(--share) * 100%),
+      var(--gg-ground) 0
+    );
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition:
+      background-color var(--dur-quick) var(--ease-out),
+      transform var(--dur-instant) var(--ease-out);
+  }
+  .gg__chip:active:not([aria-disabled="true"]) {
+    transform: scale(0.96);
+  }
+  .gg__share {
+    color: var(--color-text-muted);
+  }
+  .gg__chip[aria-pressed="true"] {
+    --gg-wash: color-mix(in srgb, var(--color-accent) 22%, var(--color-accent-soft));
+    --gg-ground: var(--color-accent-soft);
+    border-color: var(--color-accent);
+  }
+  .gg__chip[aria-pressed="true"]::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+  .gg__chip[aria-pressed="true"] .gg__share {
+    color: var(--color-text);
+  }
+  /* None in this block, or none with the kinds already picked ("all"). */
+  .gg__chip--none,
+  .gg__chip--clash {
+    border-style: dashed;
+    color: var(--color-text-muted);
+  }
+  .gg__chip--none {
+    cursor: default;
+  }
+  .gg__more {
+    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 36px;
+    font-size: var(--text-sm);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .gg__more .num {
+    color: var(--color-text-muted);
+  }
+
+  @media (pointer: coarse) {
+    .gg__chip,
+    .gg__more,
+    .gg__mode button,
+    .gg__clear,
+    .gg__tag {
+      min-height: var(--touch);
+    }
+  }
+
+  @keyframes gg-in {
+    from {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+  }
+
+  /* Wide screens: the panel docks beside the map, over the facts, never over the map. */
+  @media (min-width: 65em) {
+    .gg--beside {
+      position: static;
+    }
+    .gg--beside .gg__panel {
+      top: 0;
+      right: calc(100% + var(--space-5));
+      bottom: auto;
+      left: auto;
+      z-index: 5;
+      width: min(24rem, 90%);
+      max-width: none;
+      max-height: 100%;
+      border-bottom: 1px solid var(--color-line);
+      border-radius: var(--radius-l);
+      position: absolute;
+      transform: translateX(var(--space-3));
+    }
+    .gg--below .gg__panel {
+      top: calc(100% + var(--space-2));
+      right: 0;
+      bottom: auto;
+      left: auto;
+      width: 26rem;
+      max-width: 100%;
+      max-height: min(30rem, 70vh);
+      border-bottom: 1px solid var(--color-line);
+      border-radius: var(--radius-l);
+      position: absolute;
+      transform: translateY(calc(-1 * var(--space-2)));
+    }
+    .gg--open .gg__panel {
+      transform: none;
+    }
+  }
+
+  /* The alternative: the panel always open, in place, under the map. */
+  .gg--inline .gg__panel {
+    position: static;
+    max-width: none;
+    max-height: none;
+    margin-top: var(--space-2);
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .gg--inline .gg__head {
+    padding: 0 0 var(--space-3);
+    border-bottom: 0;
+  }
+  .gg--inline .gg__now {
+    display: none;
+  }
+  .gg--inline .gg__body {
+    padding: 0;
+    overflow: visible;
+  }
+}

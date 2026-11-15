@@ -27,6 +27,8 @@ export interface TxGridProps {
   label: string;
   /** The txid of a transaction, shown on hover and opened on click. */
   txid: (tx: GridTx) => Promise<string>;
+  /** Keeps the transactions this returns true for lit and dims the rest; all lit when absent. */
+  lit?: ((tx: GridTx) => boolean) | undefined;
   /** Rings this transaction, by id, such as while its row in a list is hovered. */
   highlight?: number | string | undefined;
   onState?: (state: GridState) => void;
@@ -69,6 +71,8 @@ export default function TxGrid(props: TxGridProps) {
     colors: new Float32Array(33),
     ease: new Float32Array([...SETTLE, ...IN_OUT]),
   };
+  // The alpha of a dimmed square (`--txgrid-dim`, per theme): its fee colour hints through.
+  const [dim, setDim] = createSignal(0.18);
   const [geometry, setGeometry] = createSignal(0);
   const [rankOf, setRankOf] = createSignal(new Map<number | string, number>());
   const [active, setActive] = createSignal<number | string>();
@@ -102,6 +106,7 @@ export default function TxGrid(props: TxGridProps) {
     for (const [i, name] of names.entries()) {
       colors.set(parseColor(s.getPropertyValue(name)) ?? [0.5, 0.5, 0.5], i * 3);
     }
+    setDim(Number.parseFloat(s.getPropertyValue("--txgrid-dim")) || 0.18);
     const m = motion();
     paint = { colors, ease: new Float32Array([...m.settle, ...m.inOut]) };
   };
@@ -159,7 +164,15 @@ export default function TxGrid(props: TxGridProps) {
     const start = performance.now();
     current = layout(shown, width / height, props.capacity);
     performance.measure("txgrid layout", { start });
-    scene.update(current, shown, start - scene.epoch, document.hidden ? "snap" : arrival, motion());
+    const lit = props.lit;
+    scene.update(
+      current,
+      shown,
+      start - scene.epoch,
+      document.hidden ? "snap" : arrival,
+      motion(),
+      lit ? (tx) => (lit(tx) ? 1 : dim()) : undefined,
+    );
     const ranks = new Map<number | string, number>();
     for (let r = 0; r < scene.live; r++) ranks.set(scene.ids[r] ?? r, r);
     setRankOf(ranks);
@@ -176,6 +189,26 @@ export default function TxGrid(props: TxGridProps) {
       if (first) arrived = performance.now();
       relayout(first || !drawn ? "pour" : "change");
     },
+  );
+
+  createEffect(
+    () => [props.lit, dim()] as const,
+    ([lit, d]) => {
+      const l = current;
+      if (!renderer || !l) return;
+      const at = (r: number) => shown[l.order[r] ?? -1];
+      scene.relight(
+        (r) => {
+          const tx = at(r);
+          return !lit || !tx || lit(tx) ? 1 : d;
+        },
+        performance.now() - scene.epoch,
+        motion(),
+      );
+      renderer.upload(scene.data);
+      schedule();
+    },
+    { defer: true },
   );
 
   onSettled(() => {
@@ -232,6 +265,9 @@ export default function TxGrid(props: TxGridProps) {
       }
     };
     document.addEventListener("visibilitychange", visibility);
+    // Chromium can leave stale the part of a still canvas that something fixed covered while it was
+    // last drawn (a bottom sheet over the grid): draw again once a scroll has moved it.
+    window.addEventListener("scrollend", schedule);
     const onLost = (e: Event) => {
       e.preventDefault();
       setLost(true);
@@ -256,6 +292,7 @@ export default function TxGrid(props: TxGridProps) {
       theme.disconnect();
       dark.removeEventListener("change", repaint);
       document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("scrollend", schedule);
       canvas.removeEventListener("webglcontextlost", onLost);
       canvas.removeEventListener("webglcontextrestored", onRestored);
       renderer = null;

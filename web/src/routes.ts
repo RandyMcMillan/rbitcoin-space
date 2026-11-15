@@ -8,6 +8,7 @@ import { routes as home } from "./pages/home/routes";
 import { routes as lightning } from "./pages/lightning/routes";
 import { routes as mempool } from "./pages/mempool/routes";
 import { routes as mining } from "./pages/mining/routes";
+import { routes as mockGoggles } from "./pages/mock-goggles/routes";
 import { routes as notFound } from "./pages/not-found/routes";
 import { routes as projected } from "./pages/projected/routes";
 import { routes as tx } from "./pages/tx/routes";
@@ -27,6 +28,7 @@ export const routes: RouteDefinition[] = [
       ...lightning,
       ...ark,
       ...mempool,
+      ...mockGoggles,
       ...notFound,
     ],
   },

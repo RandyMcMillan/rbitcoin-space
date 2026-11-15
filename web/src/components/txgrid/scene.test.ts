@@ -33,6 +33,28 @@ const close = (a: readonly number[], b: readonly number[]) =>
   a.forEach((v, k) => expect(v).toBeCloseTo(b[k] ?? Number.NaN, 4));
 
 describe("Scene", () => {
+  it("dims and lights squares where they stand, the lit ones growing back into place", () => {
+    const l = layout(txs, 1.2, 100_000);
+    const s = new Scene(0);
+    s.update(l, txs, 0, "snap", MOTION, (t) => (t.id === "b" ? 1 : 0.16));
+    expect(record(s, "a")[13]).toBeCloseTo(0.16);
+    expect(record(s, "b")[13]).toBe(1);
+    s.relight((r) => (s.ids[r] === "a" ? 1 : 0.16), 1000, MOTION);
+    const a = record(s, "a");
+    const to = a.slice(4, 8);
+    close(to, at(l, txs, "a").slice(0, 4));
+    expect(a[12]).toBeCloseTo(0.16);
+    expect(a[13]).toBe(1);
+    expect(a[2] ?? 0).toBeLessThan(to[2] ?? 0); // grows from smaller
+    const b = record(s, "b");
+    close(b.slice(0, 4), b.slice(4, 8)); // fades where it is
+    expect(b[13]).toBeCloseTo(0.16);
+    // Unchanged squares keep their record.
+    expect(record(s, "c")[9]).toBe(0);
+    s.relight((r) => (s.ids[r] === "a" ? 1 : 0.16), 1000, REDUCED);
+    expect(record(s, "a")[9]).toBe(MOTION.slow);
+  });
+
   it("pours the squares in, cheapest first, each settling where the layout puts it", () => {
     const l = layout(txs, 1.2, 100_000);
     const s = new Scene(0);
