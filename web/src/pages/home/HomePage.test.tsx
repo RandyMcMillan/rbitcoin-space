@@ -106,7 +106,7 @@ describe("home page", () => {
     const el = mount(() => <HomePage />, "/regtest/");
     expect(el.querySelectorAll(".home-tile--skeleton")).toHaveLength(10);
     expect(el.querySelector(".home-stats")?.getAttribute("aria-busy")).toBe("true");
-    expect(el.querySelectorAll(".home-recent tbody tr")).toHaveLength(10);
+    expect(el.querySelectorAll(".home-recent tbody tr")).toHaveLength(6);
     expect(el.querySelector(".home-live")?.textContent).toContain("Connecting");
   });
 
@@ -148,7 +148,11 @@ describe("home page", () => {
       Response.json({ count: 0, vsize: 0, total_fee: 0, fee_histogram: [] });
     replies["/mempool/recent"] = () => Response.json([]);
     const { el } = await open();
-    await vi.waitFor(() => expect(el.textContent).toContain("Nothing is waiting"));
+    await vi.waitFor(() =>
+      expect(el.querySelector(".home-next .home-picture__meta")?.textContent).toBe(
+        "Nothing waiting",
+      ),
+    );
     expect(el.textContent).toContain("No transactions are waiting");
     expect(el.querySelector(".home-stats")?.textContent).toContain("empty");
   });
@@ -826,6 +830,55 @@ const projectedTiles = (el: HTMLElement) => [
 ];
 const count = (path: string) => requests.filter((p) => p === path).length;
 
+/** A stand-in for the browser's observer: it reports the panel in view at once, or when told. */
+let reportView: (() => void) | undefined;
+class FakeObserver {
+  static atOnce = false;
+  readonly #notify: (entries: { isIntersecting: boolean }[]) => void;
+  #stopped = false;
+  constructor(notify: (entries: { isIntersecting: boolean }[]) => void) {
+    this.#notify = notify;
+  }
+  observe() {
+    reportView = () => {
+      if (!this.#stopped) this.#notify([{ isIntersecting: true }]);
+    };
+    if (FakeObserver.atOnce) reportView();
+  }
+  disconnect() {
+    this.#stopped = true;
+  }
+}
+
+describe("the mempool panel's pictures", () => {
+  beforeEach(() => {
+    reportView = undefined;
+    FakeObserver.atOnce = false;
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+  });
+
+  it("wait until the panel comes near the view: no map topic and no history before", async () => {
+    const { ws } = await open(true);
+    const asked = () => JSON.stringify(ws.sent).includes("projected-txs:0");
+    const history = () => requests.filter((p) => p.endsWith("/app/mempool/history/2h")).length;
+    await vi.waitFor(() => expect(reportView).toBeDefined());
+    expect(asked()).toBe(false);
+    expect(history()).toBe(0);
+    reportView?.();
+    await vi.waitFor(() => expect(asked()).toBe(true));
+    await vi.waitFor(() => expect(history()).toBe(1));
+  });
+
+  it("say why the map is empty while its data cannot come, never a blank frame", async () => {
+    FakeObserver.atOnce = true;
+    const { el, ws } = await open(true);
+    const note = () => el.querySelector(".home-next__note")?.textContent;
+    await vi.waitFor(() => expect(note()).toBe("Loading the next block…"));
+    ws.drop(1006);
+    await vi.waitFor(() => expect(note()).toBe("The map shows while the page is live."));
+  });
+});
+
 describe("the live mempool", () => {
   it("makes each request once on a cold load, and none the topics answer", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -861,31 +914,9 @@ describe("the live mempool", () => {
     expect(stats).toContain("≈ 3 blocks");
     expect(stats).toContain("0.10 sat/vB");
     expect(stats).toContain("node minimum");
-    // One row per fee band, dearest first: its size against one block, and how deep the queue is
-    // by its end. A band with nothing says so.
-    const rows = [...el.querySelectorAll<HTMLElement>(".home-depth__row")];
-    expect(rows.map((r) => Number(r.style.getPropertyValue("--w")).toFixed(3))).toStrictEqual([
-      "1.000",
-      "0.000",
-      "0.000",
-      "0.000",
-      "0.000",
-      "0.925",
-      "0.000",
-      "0.000",
-      "0.000",
-      "0.000",
-      "0.000",
-      "1.000",
-    ]);
-    const cells = (r: HTMLElement | undefined) =>
-      [...(r?.querySelectorAll("td") ?? [])].map((c) => c.textContent);
-    expect(cells(rows[0])).toStrictEqual(["10+", "", "1.00 MvB", "1.0"]);
-    expect(cells(rows[1])).toStrictEqual(["5–10", "", "–", "1.0"]);
-    expect(cells(rows[11])).toStrictEqual(["< 0.12", "", "1.00 MvB", "2.5"]);
-    // The answer above: the next block's worth runs out in the dearest band.
-    expect(el.querySelector(".home-depth__answer")?.textContent).toBe(
-      "The next block's worth reaches down to 10+ sat/vB.",
+    // The next block's map is headed by the fee rate its worth reaches down to: here the dearest band.
+    expect(el.querySelector(".home-next .home-picture__meta")?.textContent).toBe(
+      "down to 10+ sat/vB",
     );
     expect(el.querySelector(".home-recent tbody")?.textContent).toContain("dddddddd");
     expect(el.querySelector(".home-recent tbody")?.textContent).toContain("250 vB");
@@ -1135,7 +1166,8 @@ describe("the fee panel", () => {
     ]);
     // The rates are numbers alone: colour belongs to the drawings.
     expect(el.querySelector(".home-fees .fee__swatch")).toBeNull();
-    expect(feeNote(el)).toContain("later arrivals don't outbid you");
+    // Separate answers need no line under them.
+    expect(el.querySelector(".home-fees__note")).toBeNull();
     expect(feeNote(el)).not.toContain("node");
     expect(count("/v1/fees/precise")).toBe(0);
   });
@@ -1166,7 +1198,7 @@ describe("the fee panel", () => {
     ws.receive(feesMsg("node", [1500, 1000, 1000, 120]));
     expect(highest(el)).toBe("Highnext block1.50 sat/vB");
     expect(feeNote(el)).toBe(
-      "The node's own estimates: this server cannot make its own recommendation right now.",
+      "The node's own estimates: this server has none of its own right now.",
     );
   });
 
@@ -1175,7 +1207,8 @@ describe("the fee panel", () => {
     ws.receive(feesMsg("node", [1500, 1000, 1000, 120]));
     ws.receive(feesMsg("projected", [3000, 2000, 1000, 100]));
     expect(highest(el)).toBe("Highnext block3.00 sat/vB");
-    expect(feeNote(el)).toContain("later arrivals don't outbid you");
+    // Separate answers need no line under them.
+    expect(el.querySelector(".home-fees__note")).toBeNull();
     ws.receive({ topic: "fees", type: "unavailable" });
     const panel = el.querySelector(".home-fees") as HTMLElement;
     expect(panel.textContent).toContain("No recommendation right now");
@@ -1225,7 +1258,8 @@ describe("the fee panel", () => {
         );
       await vi.advanceTimersByTimeAsync(FEES_POLL_MS);
       await vi.waitFor(() => expect(highest(el)).toBe("Highnext block2.50 sat/vB"));
-      expect(feeNote(el)).toContain("later arrivals don't outbid you");
+      // Separate answers need no line under them.
+      expect(el.querySelector(".home-fees__note")).toBeNull();
       // A failed ask shows no number rather than the last one.
       reply = () => Response.json({ error: "upstream unavailable" }, { status: 502 });
       await vi.advanceTimersByTimeAsync(FEES_POLL_MS);

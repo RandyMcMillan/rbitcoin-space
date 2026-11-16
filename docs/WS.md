@@ -66,7 +66,7 @@ Fed by the network's mempool tracker and projected blocks ([`MEMPOOL.md`](MEMPOO
 | `projected` | The block strip's projected tiles | JSON, the whole state each time | about 1.4 KB |
 | `transactions` | The home page's latest transactions | JSON, the whole list each time | about 1.4 KB |
 | `fees` | The home page's "Fee to pay now" panel | JSON, the whole state each time, only when it changed, and at once on a new block | about 390 bytes, one or two a minute |
-| `projected-txs:0` to `projected-txs:6` | One projected block's grid | Binary: a snapshot, then deltas | snapshot 56 bytes a transaction; see [Cost](#cost-of-the-mempool-topics) |
+| `projected-txs:0` to `projected-txs:6` | One projected block's grid; `0` also the home page's next-block map | Binary: a snapshot, then deltas | snapshot 56 bytes a transaction; see [Cost](#cost-of-the-mempool-topics) |
 
 With `{NET}_MEMPOOL_ENABLED=false` every one of them but `fees` (and [`replacements`](#replacements) too) answers subscribe with `{"topic":"…","type":"off"}` and nothing else; `fees` then carries the node's own estimates.
 
@@ -227,6 +227,8 @@ The server never skips a frame for a subscriber: one that cannot keep up is clos
 | `projected-txs:1` | 582 after a 378 KB snapshot (7,880 transactions; 441 KB at 56 bytes, computed) | a delta per 2.1 s |
 
 These runs sent 48-byte records, before the flags; a delta's records grow by a sixth with them.
+
+The home page takes `projected-txs:0` too, for its next-block map, once its mempool panel nears the view. Measured on mainnet, 2026-11-16, a cold page in Chromium at 1440 px with 72,000 to 75,000 transactions waiting: the socket brought about 24 KB in its first 15 s before the map and 140 to 225 KB with it (the snapshot of about 3,300 transactions), and 269 KB in its first 60 s, about 1.9 KB/s after the snapshot for every topic together.
 
 The context bits (paid for by a child, pays for a parent) flip as chunks change, and each flip is a set record. Measured on mainnet, 2026-11-15, 75,000 transactions, two servers side by side for the same 240 s with no block: `projected-txs:0` sent 4,727 B/s and 110 records a delta with them, 4,693 B/s and 112 without. No measurable cost, and that was before the 10% margin, which flags far fewer.
 
