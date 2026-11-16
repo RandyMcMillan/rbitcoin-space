@@ -273,7 +273,7 @@ The owner's request of 2026-11-16, after comparing the home page with mempool.sp
 
 | ID | Task | Needs | Status |
 |---|---|---|---|
-| HD1 | Fees and difficulty as one short row; the mempool panel a fixed height with the next block's map and the incoming rate instead of the fee-row disclosure; the latest transactions and the replacements side by side with short ids. Phones keep one column. `DESIGN.md`'s home layout follows | — | doing |
+| HD1 | Fees and difficulty as one short row; the mempool panel a fixed height with the next block's map and the incoming rate instead of the fee-row disclosure; the latest transactions and the replacements side by side with short ids. Phones keep one column. `DESIGN.md`'s home layout follows | — | done ([#206](https://github.com/smolcars/rbitcoin-space/pull/206), `bd71087b`): at 1440 px the page is 1446 px tall (1905 before) and both tables start above a 900 px fold. The per-band table and its "blocks deep" column left the home page and were not moved: `/mempool`'s chart already shows each band's size. The map and chart load when the panel nears view; a cold desktop load went from 25 requests and 203 KB to 35–37 and 245–268 KB, and the socket's first 15 s from 24 KB to 140–225 KB (the next block's snapshot), then about 1.9 KB/s. Not checked: the map across a new block, browsers other than Chromium |
 
 ## M11 — Pool attribution: tag before address
 
