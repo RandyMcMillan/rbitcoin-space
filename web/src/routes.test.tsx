@@ -41,6 +41,9 @@ describe("routes", () => {
     ["/signet/", "Blocks"],
     ["/testnet4/tx/ab", "Transaction"],
     ["/signet/nope/deeper", "Page not found"],
+    // The decoder is one page outside every network's prefix.
+    ["/decode", "Decode"],
+    ["/signet/decode", "Page not found"],
   ])("%s shows %s", async (url, heading) => {
     const { el } = await open(url);
     expect(el.querySelector("h1")?.textContent).toBe(heading);
@@ -56,6 +59,8 @@ describe("routes", () => {
     expect(el.querySelector('nav[aria-label="Main"] a:nth-child(3)')?.getAttribute("href")).toBe(
       "/testnet4/mining",
     );
+    // The decoder is one page for every network.
+    expect(el.querySelector(".site-footer a[href='/decode']")?.textContent).toBe("Decoder");
     expect(document.title).toBe("Testnet4: Transaction | rbitcoin.space");
   });
 
@@ -96,5 +101,12 @@ describe("routes", () => {
   it("moves off a network the server does not serve", async () => {
     const { history } = await open("/tx/ab", ["signet"]);
     await vi.waitFor(() => expect(history.get()).toBe("/signet/tx/ab"));
+  });
+
+  it("keeps the query and fragment as it moves, and leaves a page on no network", async () => {
+    const moved = await open("/address/bc1q?view=unspent#x", ["signet"]);
+    await vi.waitFor(() => expect(moved.history.get()).toBe("/signet/address/bc1q?view=unspent#x"));
+    const decoder = await open("/decode#lnbc1x", ["signet"]);
+    expect(decoder.history.get()).toBe("/decode#lnbc1x");
   });
 });

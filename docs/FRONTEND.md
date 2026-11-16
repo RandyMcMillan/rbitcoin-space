@@ -78,6 +78,7 @@ The network comes from the path. `useNetwork()` returns it; never keep it anywhe
 | Bark VTXO | `/ark/bark/vtxo/:id` (`<txid>:<vout>`) | `pages/ark/bark` | Ark |
 | Bark VTXO from its hex | `/ark/bark/hex#<hex>` (the hex in the fragment, sent in a `POST` body) | `pages/ark/bark` | Ark |
 | Arkade address | `/ark/arkade/address/:address`, `?page=n` | `pages/ark/arkade` | Ark |
+| Decoder, one for every network | `/decode#<string>` (the string in the fragment, sent in a `POST` body); outside the prefixes, so `onNetwork` leaves it as it is | `pages/decode` | LN13 |
 | Not found | anything else | `pages/not-found` | shell |
 
 Every page is loaded lazily.
@@ -363,6 +364,12 @@ A mainnet server 18 minutes after its first sample (keys are sent in another ord
 #### Arkade address
 
 `pages/ark/arkade/AddressPage.tsx` reads `GET /app/ark/arkade/address/:address?page=n` ([`ARK.md`](ARK.md#an-addresss-vtxos)): `page`, `pages` and up to 25 `vtxos`, read strictly (`readListing` in `address.ts`). The page in the address is `?page=n` (`paths.arkadeAddress(address, n)`); a page's answer is held while the next loads. The shape decides, before any request, what the page can say alone: not an Arkade address, a Bark address, an unknown version, another network's (`addressKind`, by BOAT-1); the server's checksum and key checks follow. The figures count only the page shown ("on this page" when there are more): no total over pages is ever computed. Spendable is arkd's word for neither spent nor swept. Asked once, not polled.
+
+#### Decoder
+
+`pages/decode/DecodePage.tsx` sends the fragment's string to `POST /app/decode` ([`API.md`](API.md#decoding)) and reads the answer strictly (`isDecoded` in `decode.ts`). A node or channel is a link to its page on the network the answer's `names` gives, only when that graph knows it; otherwise its key or id is text with a copy button. A decoded URL is text, never a link, its host set apart. Only the expiry's words follow the clock.
+
+**The service an LNURL or Lightning address names** is asked from the browser, once, as soon as the result shows (`service.ts`, allowed by `connect-src 'self' https:`, [`SECURITY.md`](SECURITY.md) rule 15): a pay, withdraw, channel or untagged LNURL, or a Lightning address; never a login link. One `GET` of the decoded URL, only over HTTPS to a public name (no address literal, no `.local`, `.home.arpa`, `.onion` and the like: those read "Not asked"), with no cookies and no referrer, no redirect followed, 8 s to answer whole, at most 64 KB read; it is aborted when the box is edited away from the decoded string, or the page is left. A login link is known by its tag as the service reads it (percent-decoded, any case), and every `keyauth://` link is one. The callback, the second step that would ask for an invoice or a withdrawal, is never called. Every field is read strictly and shown as text: the kind, the least and most in sats, the `text/plain` description (or `defaultDescription`), the long description and identifier, the comment length, the callback's host (with "Other host" when it is not the one asked), a channel request's node; images, HTML and links in the answer are not shown. A service's `{"status":"ERROR"}` shows its reason. Failures are one line each: asking, no answer in time, "Could not ask <host>" (a refusal to answer another site's page and a network fault look the same to the page). The footer links here from every network's pages. Search sends a payment string here by its form alone (`payment` in `search/query.ts`: a prefix, or for a Lightning address an email's shape with a dotted domain), from any network, and its field takes 8,192 characters for them; everything else it reads is still capped at 512.
 
 ### Live data
 

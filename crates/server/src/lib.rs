@@ -12,6 +12,7 @@ pub mod ark_bark;
 mod audits;
 pub mod blocks;
 pub mod config;
+pub mod decode;
 pub mod difficulty;
 pub mod error;
 pub mod esplora;
@@ -61,11 +62,12 @@ pub use error::ApiError;
 use limits::Limiter;
 pub use serve::bind;
 
-/// Sent on every response. The CSP is SECURITY.md rule 15.
+/// Sent on every response. The CSP is SECURITY.md rule 15: `connect-src` lets the decoder's page
+/// ask, over HTTPS, the service a pasted LNURL or Lightning address names; nothing else leaves `'self'`.
 pub const SECURITY_HEADERS: [(HeaderName, &str); 4] = [
     (
         CONTENT_SECURITY_POLICY,
-        "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+        "default-src 'self'; connect-src 'self' https:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
     ),
     (X_CONTENT_TYPE_OPTIONS, "nosniff"),
     (REFERRER_POLICY, "no-referrer"),
@@ -74,7 +76,7 @@ pub const SECURITY_HEADERS: [(HeaderName, &str); 4] = [
 
 /// Rule 15's one exception, sent instead of the CSP above when `CLOUDFLARE_WEB_ANALYTICS` is on:
 /// the beacon script Cloudflare injects and the endpoint it reports to.
-pub const CLOUDFLARE_CSP: &str = "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
+pub const CLOUDFLARE_CSP: &str = "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https: https://cloudflareinsights.com; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
 
 /// The commit this binary was built from, or `unknown` (`build.rs`).
 pub const REVISION: &str = env!("SOURCE_REVISION");
@@ -406,6 +408,17 @@ impl App {
             enabled_networks.clone(),
         ));
         let contexts = enabled_networks.clone();
+        // Server-wide, like `/app/config`: a pasted string names its own network (`decode`).
+        let decoder = Arc::new(decode::Decoder::new(
+            enabled_networks.clone(),
+            config.limits.max_tracked_clients,
+        ));
+        app = app.route(
+            "/app/decode",
+            post(decode::route)
+                .layer(DefaultBodyLimit::max(decode::MAX_BODY))
+                .with_state(decoder),
+        );
         let networks = Arc::new(enabled_networks);
         app = app.route(
             "/readyz",
