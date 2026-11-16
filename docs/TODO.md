@@ -274,3 +274,11 @@ The owner's request of 2026-11-16, after comparing the home page with mempool.sp
 | ID | Task | Needs | Status |
 |---|---|---|---|
 | HD1 | Fees and difficulty as one short row; the mempool panel a fixed height with the next block's map and the incoming rate instead of the fee-row disclosure; the latest transactions and the replacements side by side with short ids. Phones keep one column. `DESIGN.md`'s home layout follows | — | doing |
+
+## M11 — Pool attribution: tag before address
+
+A reviewer's point of 2026-11-16: crediting a block to a listed payout address first lets a solo miner who joins P2Pool, or any pool that pays miners from the coinbase, take that pool's blocks (Testnet 5 block 4329 pays jaonoctus inside a P2Poolv2 block). The coinbase tag now decides first; a listed address is the fallback.
+
+| ID | Task | Needs | Status |
+|---|---|---|---|
+| PA1 | `Pools::attribute` checks the tag before the payout address; the rules number moves so stored rows are re-credited; `API.md`, `FRONTEND.md` and the mining page's sentence follow | — | doing |
