@@ -137,6 +137,7 @@ pub(crate) async fn keep(
     peer: Arc<ln::Peer>,
     store: Arc<Store>,
     l: Arc<Lightning>,
+    hub: Arc<crate::ws::Hub>,
     network: &'static str,
 ) {
     let status = peer.status();
@@ -146,7 +147,20 @@ pub(crate) async fn keep(
         if status.borrow().synced {
             round(&*peer, &store, &l, network, &mut past, Index::build).await;
             // After the build, never inside it: the fee history's writes do not delay an index.
-            super::fees::round(&l, &store, &mut run).await;
+            let fees = super::fees::round(&l, &store, &mut run).await;
+            if let Some(index) = l.index() {
+                let started = Instant::now();
+                // Live once the close-watcher has caught up, every record it sent is stored and a
+                // fee round stored all it found: what a catch-up found must be in the table, which
+                // the feed fills from, not on its way to it.
+                let caught_up = l.feed_live()
+                    || (status.borrow().closes.caught_up
+                        && run.is_some_and(|(_, fees_live)| fees_live)
+                        && peer.recent(l.seq.load(Ordering::Relaxed)).is_empty());
+                super::feed::round(&l, &store, &hub, &index, fees, caught_up).await;
+                let us = started.elapsed().as_micros().try_into().unwrap_or(u64::MAX);
+                l.feed_us.store(us, Ordering::Relaxed);
+            }
         }
         let wait = if l.index().is_some() {
             EVERY

@@ -14,6 +14,7 @@ use engine::lightning::{self as store_ln, Index};
 use engine::store::Store;
 use serde_json::{Value, json};
 
+use super::feed::Event;
 use super::nodes::{
     Answer, NO_CHANNEL, NO_NODE, graph, inbound_json, number, pubkey, query, scid, send,
 };
@@ -31,20 +32,34 @@ const MAX_CHANGES: u64 = 50;
 /// One round, after an index build: loads the kept heads once per run, compares the newest
 /// index with them, stores what differs and forgets channels the index no longer holds. A
 /// failed read or write is tried again at the next round: the table decides what is a change,
-/// so a round repeated stores nothing twice. `run` is when this run's watching began.
-pub(crate) async fn round(l: &Arc<Lightning>, store: &Store, run: &mut Option<u64>) {
-    let Some(index) = l.index() else { return };
+/// so a round repeated stores nothing twice. `run` is when this run's watching began, and
+/// whether a round of it has stored everything it found.
+///
+/// Returns the changes stored, for the overview's feed; none until a round has stored all it
+/// found, since until then what is stored is what changed while the server was down.
+pub(crate) async fn round(
+    l: &Arc<Lightning>,
+    store: &Store,
+    run: &mut Option<(u64, bool)>,
+) -> Vec<Event> {
+    let Some(index) = l.index() else {
+        return Vec::new();
+    };
     if run.is_none() {
         match fees::heads(store).await {
             Ok(h) => *l.fees.write().unwrap_or_else(PoisonError::into_inner) = h,
             Err(_) => {
                 l.fee_failures.fetch_add(1, Ordering::Relaxed);
-                return;
+                return Vec::new();
             }
         }
-        *run = Some(store_ln::unix_now());
+        *run = Some((store_ln::unix_now(), false));
     }
-    let Some(start) = *run else { return };
+    let Some((start, live)) = *run else {
+        return Vec::new();
+    };
+    let mut whole = true;
+    let mut events = Vec::new();
     let records = {
         let (l, index) = (Arc::clone(l), Arc::clone(&index));
         tokio::task::spawn_blocking(move || {
@@ -75,6 +90,14 @@ pub(crate) async fn round(l: &Arc<Lightning>, store: &Store, run: &mut Option<u6
                     .filter(|o| matches!(o, fees::Outcome::Stored { .. }))
                     .count();
                 l.fee_records.fetch_add(stored as u64, Ordering::Relaxed);
+                if live {
+                    events.extend(chunk.iter().zip(&outcomes).filter_map(|(r, o)| match o {
+                        fees::Outcome::Stored {
+                            before: Some(before),
+                        } => Event::fee(&index, r.0, r.1, *before, r.2),
+                        _ => None,
+                    }));
+                }
                 l.fees
                     .write()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -82,14 +105,17 @@ pub(crate) async fn round(l: &Arc<Lightning>, store: &Store, run: &mut Option<u6
             }
             Err(_) => {
                 l.fee_failures.fetch_add(1, Ordering::Relaxed);
+                whole = false;
                 break;
             }
         }
     }
+    *run = Some((start, live || whole));
     l.fee_write_us.store(
         started.elapsed().as_micros().try_into().unwrap_or(u64::MAX),
         Ordering::Relaxed,
     );
+    events
 }
 
 pub fn routes() -> Router<Arc<NetworkContext>> {
