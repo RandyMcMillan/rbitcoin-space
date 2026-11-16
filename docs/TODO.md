@@ -259,10 +259,10 @@ The owner's request of 2026-11-15: tell a block's transactions apart by kind, as
 
 ## M9 — Wavelength: Lightning Labs' Ark
 
-The owner's request of 2026-11-16. Wavelength has no Ark address (every payment is a BOLT 11 invoice) and its operator answers no public lookup, so a VTXO is shown from the wallet's exit export: a JSON bundle of the signed transactions that take it to chain, checked against our node. Three PRs in one `gh stack`, left open for the owner (full-stop). Fixtures: three signet bundles recorded by the orchestrator from throwaway wallets.
+The owner's request of 2026-11-16. Wavelength has no Ark address (every payment is a BOLT 11 invoice) and its operator answers no public lookup, so a VTXO is shown from the wallet's exit export: a JSON bundle of the signed transactions that take it to chain, checked against our node. Planned as three stacked PRs and dropped the same day, before any code was written.
 
 | ID | Task | Needs | Status |
 |---|---|---|---|
-| WL1 | `crates/wavelength` and `POST /app/ark/wavelength/export`: parse a bundle, verify every key spend and script spend, anchor its external inputs on the node, compute the expiry | — | doing |
-| WL2 | The page `/ark/wavelength/export`, the `/ark` box reading a pasted bundle, and `wavelength` in `/app/config`'s `ark` list. Stacked on WL1 | WL1 | todo |
-| WL3 | The decoder names a Wavelength invoice by its route hints (the swap server's nodes, one virtual channel) and links it to a VTXO whose script holds its payment hash. Stacked on WL2 | WL2 | todo |
+| WL1 | `crates/wavelength` and `POST /app/ark/wavelength/export`: parse a bundle, verify every key spend and script spend, anchor its external inputs on the node, compute the expiry | — | skipped: the owner dropped it on 2026-11-16. Wavelength's operator answers no public lookup, so the page could only show a bundle its visitor already holds |
+| WL2 | The page `/ark/wavelength/export`, the `/ark` box reading a pasted bundle, and `wavelength` in `/app/config`'s `ark` list. Stacked on WL1 | WL1 | skipped: as WL1 |
+| WL3 | The decoder names a Wavelength invoice by its route hints (the swap server's nodes, one virtual channel) and links it to a VTXO whose script holds its payment hash. Stacked on WL2 | WL2 | skipped: as WL1; naming the invoice alone says nothing about Ark |
