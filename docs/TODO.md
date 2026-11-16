@@ -266,3 +266,11 @@ The owner's request of 2026-11-16. Wavelength has no Ark address (every payment 
 | WL1 | `crates/wavelength` and `POST /app/ark/wavelength/export`: parse a bundle, verify every key spend and script spend, anchor its external inputs on the node, compute the expiry | — | skipped: the owner dropped it on 2026-11-16. Wavelength's operator answers no public lookup, so the page could only show a bundle its visitor already holds |
 | WL2 | The page `/ark/wavelength/export`, the `/ark` box reading a pasted bundle, and `wavelength` in `/app/config`'s `ark` list. Stacked on WL1 | WL1 | skipped: as WL1 |
 | WL3 | The decoder names a Wavelength invoice by its route hints (the swap server's nodes, one virtual channel) and links it to a VTXO whose script holds its payment hash. Stacked on WL2 | WL2 | skipped: as WL1; naming the invoice alone says nothing about Ark |
+
+## M10 — A denser home page
+
+The owner's request of 2026-11-16, after comparing the home page with mempool.space's side by side: the panels waste space. The fee and difficulty panels are too tall for what they say, the mempool panel is blank with its fee rows closed and too long with them open, and the latest transactions and the replacements sit one above the other at full width with long ids.
+
+| ID | Task | Needs | Status |
+|---|---|---|---|
+| HD1 | Fees and difficulty as one short row; the mempool panel a fixed height with the next block's map and the incoming rate instead of the fee-row disclosure; the latest transactions and the replacements side by side with short ids. Phones keep one column. `DESIGN.md`'s home layout follows | — | doing |
