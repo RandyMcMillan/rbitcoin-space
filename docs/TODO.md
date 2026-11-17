@@ -289,3 +289,11 @@ A reviewer's point of 2026-11-16: crediting a block to a listed payout address f
 | ID | Task | Needs | Status |
 |---|---|---|---|
 | PA1 | `Pools::attribute` checks the tag before the payout address; the rules number moves so stored rows are re-credited; `API.md`, `FRONTEND.md` and the mining page's sentence follow | — | doing |
+
+## M12 — Text people put on the chain
+
+The owner's request of 2026-11-17: show the text in an OP_RETURN, in a coinbase and in a text inscription on the transaction page, and never render an image.
+
+| ID | Task | Needs | Status |
+|---|---|---|---|
+| CT1 | Chain text on the transaction page as mocked up in draft [#239](https://github.com/smolcars/rbitcoin-space/pull/239), approved by the owner on 2026-11-17 (option B, "full-send"): coinbase text, OP_RETURN text and the text of an inscription (`text/*` and `application/json`) on a line of their own under the flow card, whole in the inspector; anything else named by type and size only. A pool's coinbase reads as its words ("Mined by Luxor") on the transaction page and in the block page's "Coinbase tag". The genesis coinbase no longer claims a block height. `DESIGN.md` and `FRONTEND.md` follow | — | doing |
