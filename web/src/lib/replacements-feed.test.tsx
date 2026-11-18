@@ -11,6 +11,7 @@ let caching: (RequestCache | undefined)[];
 let feeds: Replacements[];
 /** How long the server takes to answer, as a retry after a refusal would. */
 let delay = 0;
+let start = Date.now();
 
 function Probe() {
   feeds.push(createReplacements("regtest", () => false, { gapMs: 1500 }));
@@ -20,7 +21,9 @@ const version = (v: number) =>
   FakeSocket.last().receive({ topic: "replacements", type: "replacements", version: v });
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "Date"] });
+  // Asks are remembered page-wide, so each test starts well past every wait the others left.
+  start += 3_600_000;
+  vi.useFakeTimers({ now: start, toFake: ["setTimeout", "clearTimeout", "setInterval", "Date"] });
   clearApiCache();
   asks = [];
   feeds = [];
@@ -95,9 +98,25 @@ describe("createReplacements", () => {
     expect((asks[1] ?? 0) - (asks[0] ?? 0)).toBeGreaterThanOrEqual(4500);
   });
 
+  it("shows the list the page already holds at once when opened again, then asks within the gap", async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+    mount(() => <Probe />, "/regtest/");
+    FakeSocket.last().hello();
+    version(1);
+    await vi.waitFor(() => expect(feeds[0]?.stories()).toStrictEqual([]));
+    const before = asks.length;
+    // The reader comes back to the page a moment later: the topic says nothing new.
+    await vi.advanceTimersByTimeAsync(200);
+    mount(() => <Probe />, "/regtest/");
+    expect(feeds[1]?.stories()).toStrictEqual([]);
+    expect(asks).toHaveLength(before);
+    await vi.advanceTimersByTimeAsync(1400);
+    expect(asks).toHaveLength(before + 1);
+  });
+
   it("asks the server, never the browser's cache, which can hold the list from before a change", async () => {
     // Past the wait the tests before left: asks are remembered page-wide, on a clock they ran ahead.
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     mount(() => <Probe />, "/regtest/");
     FakeSocket.last().hello();
     version(1);

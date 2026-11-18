@@ -74,6 +74,80 @@ test("the strip scrolls right into the past, down to block 0, and back to now", 
   await expect(lane.getByRole("link", { name: /^Block 110,/ })).toBeInViewport();
 });
 
+test("a mouse drags the strip into the past, it glides on, and a drag opens no block", async ({
+  page,
+}) => {
+  await page.goto("/regtest/");
+  const lane = page.getByRole("list", { name: "Mined blocks, newest first" });
+  const scroller = page.locator(".home-strip__scroller");
+  await expect(lane.getByRole("link").first()).toHaveAccessibleName(/^Block 110,/);
+  const left = () => scroller.evaluate((el) => el.scrollLeft);
+  // No bar to aim for: the strip is moved by hand.
+  expect(
+    await scroller.evaluate(
+      (el) => (el instanceof HTMLElement ? el.offsetHeight : 0) - el.clientHeight,
+    ),
+  ).toBe(0);
+
+  // Pressed near the right edge and pulled across, held still, let go: it moved with the hand,
+  // and stays.
+  const tile = await lane.getByRole("link").first().boundingBox();
+  if (!tile) throw new Error("no tile");
+  const y = tile.y + tile.height / 2;
+  const x = (page.viewportSize()?.width ?? 0) - 10;
+  const pull = x - 20;
+  const start = await left();
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - pull, y, { steps: 10 });
+  await expect(scroller).toHaveAttribute("data-dragging", "");
+  expect(await left()).toBeCloseTo(start + pull, -1);
+  await page.waitForTimeout(150);
+  await page.mouse.up();
+  await expect(scroller).not.toHaveAttribute("data-dragging");
+  expect(await left()).toBeCloseTo(start + pull, -1);
+  await expect(page).toHaveURL(/\/regtest\/$/);
+
+  // A flick: it glides on past where the hand stopped, into blocks loaded from the past.
+  const flicked = await left();
+  const flick = async () => {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 200, y, { steps: 4 });
+    await page.mouse.up();
+    // A loaded machine can stall a flick into a stop, which does not glide: flick again.
+    await expect(scroller).toHaveAttribute("data-dragging", "", { timeout: 100 });
+  };
+  await expect(flick).toPass();
+  await expect.poll(left).toBeGreaterThan(flicked + 400);
+  await expect(page).toHaveURL(/\/regtest\/$/);
+  await expect(page.getByRole("button", { name: "Back to now" })).toBeVisible();
+  // Below the live list's ten, so loaded from the past as the strip went.
+  const lowestInView = () =>
+    scroller.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const heights = [...el.querySelectorAll<HTMLElement>("li[data-height]:has(a)")]
+        .filter((li) => {
+          const r = li.getBoundingClientRect();
+          return r.left >= box.left && r.right <= box.right;
+        })
+        .map((li) => Number(li.dataset["height"]));
+      return Math.min(...heights);
+    });
+  await expect.poll(lowestInView).toBeLessThan(101);
+
+  // "Back to now" pressed while a flick still glides: the strip goes back, the glide does not win.
+  await expect(scroller).not.toHaveAttribute("data-dragging");
+  await expect(flick).toPass();
+  await page.getByRole("button", { name: "Back to now" }).click();
+  await expect(page.locator(".home-strip__now")).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Back to now" })).toHaveCount(0);
+
+  // A press that does not move is still a click on the block.
+  await lane.getByRole("link", { name: /^Block 110,/ }).click();
+  await expect(page).toHaveURL(/\/regtest\/block\//);
+});
+
 test("each tile shows its fee gauge and figures, and a coinbase-only block says so", async ({
   page,
 }) => {
@@ -204,7 +278,8 @@ test("the fee panel follows the fees topic: an update, the node's fallback, then
 
   send?.(levels([1031, 500, 200, 100], "projected"));
   await expect(high).toHaveText("1.04 sat/vB");
-  await expect(panel).toContainText("later arrivals don't outbid you");
+  // Separate answers of the server's own need no line under them.
+  await expect(panel.locator(".home-fees__note")).toHaveCount(0);
   // The mempool filled up: the next message is the new answer.
   send?.(levels([2501, 1031, 200, 100], "projected"));
   await expect(high).toHaveText("2.51 sat/vB");
@@ -212,7 +287,7 @@ test("the fee panel follows the fees topic: an update, the node's fallback, then
   await expect(high).toHaveText("3.00 sat/vB");
   await expect(panel).toContainText("The node's own estimates");
   // Merging equal answers, or splitting them again, never changes the panel's height; one answer
-  // for every wait is one row, the panel no taller than it.
+  // for every wait is one row, so a phone's two rows become one (wider, they are one row already).
   const four = await height();
   for (const rates of [
     [3000, 100, 100, 100],
@@ -225,7 +300,9 @@ test("the fee panel follows the fees topic: an update, the node's fallback, then
   }
   send?.(levels([100, 100, 100, 100], "projected"));
   await expect(panel.locator(".home-fees__item")).toHaveCount(1);
-  await expect.poll(height).toBeLessThan(four * 0.6);
+  await ((page.viewportSize()?.width ?? 0) > 640
+    ? expect.poll(height).toBeCloseTo(four, 0)
+    : expect.poll(height).toBeLessThan(four * 0.6));
   send?.({ topic: "fees", type: "unavailable" });
   await expect(panel).toContainText("No recommendation right now");
   await expect(panel).not.toContainText("3.00");

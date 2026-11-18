@@ -52,10 +52,13 @@ test("a node reached from a ranking keeps its section's links on one line on a p
 test("the overview, a node and a channel, from mainnet's answers", async ({ page }) => {
   await serve(page, mainnet());
   await page.goto("/regtest/lightning");
-  await expect(page.getByRole("heading", { name: "The network now" })).toBeVisible();
-  await expect(page.locator("dl").getByText(/^36\s228$/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The network now" })).toBeAttached();
+  await expect(page.locator(".ln-ov-fig").getByText(/^36\s228$/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Movers" })).toBeVisible();
 
+  // A phone shows one node list at a time.
+  const list = page.getByRole("button", { name: "Connected", exact: true });
+  if (await list.isVisible()) await list.click();
   const connected = page.getByRole("table", { name: "The five nodes with the most channels" });
   await connected.getByRole("link", { name: "ACINQ" }).click();
   await expect(page).toHaveURL(`/regtest/lightning/node/${ACINQ}`);
@@ -285,7 +288,7 @@ test("History in the section's links lands on the overview's chart from any Ligh
       // One current destination: the chart, now the reader is on it.
       await expect(nav.locator('[aria-current="location"]')).toHaveText("History");
       await expect(nav.locator('[aria-current="page"]')).toHaveCount(0);
-      const heading = page.getByRole("heading", { name: "Over time" });
+      const heading = page.getByRole("heading", { name: "Channels, over time" });
       await expect(heading).toBeInViewport();
       // Clear of the sticky header, not under it.
       const header = await page.locator(".site-header").boundingBox();
@@ -315,12 +318,13 @@ test.describe("Lightning's lists", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     for (const path of tabled(390)) {
       await page.goto(path);
-      const tables = page.locator("table.table--rows");
+      // Only what a phone shows: the overview's node lists show one at a time.
+      const tables = page.locator("table.table--rows:visible");
       await expect(tables.first()).toBeVisible();
       const count = await tables.count();
       for (let i = 0; i < count; i++) {
         if (i > 0) await page.goto(path);
-        await tapRow(page, page.locator("table.table--rows").nth(i), `${path}, table ${i + 1}`);
+        await tapRow(page, tables.nth(i), `${path}, table ${i + 1}`);
       }
     }
   });
@@ -376,7 +380,7 @@ test("the overview marks its samples while they are few, and not once they are m
   });
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const [n, marks] of [
-    [3, 6],
+    [3, 3],
     [400, 0],
   ] as const) {
     await serve(page, { ...mainnet(), "statistics/1w": series(n) });

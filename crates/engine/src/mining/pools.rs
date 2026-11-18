@@ -23,7 +23,7 @@ const LOCAL: &str = include_str!("../../data/pools/local-pools.json");
 const SHIPPED: [&str; 2] = [LIST, LOCAL];
 /// Bumped whenever the matching rules change, so stored attributions are redone like after a
 /// change to the list.
-const RULES: u32 = 1;
+const RULES: u32 = 2;
 
 /// One pool. `tags` are matched as bytes; `addresses` as their scripts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,19 +199,15 @@ impl Pools {
     /// The pool that mined a block with this coinbase script (`tag`) and these payout scripts,
     /// in output order.
     ///
-    /// 1. **A payout to a pool's address wins.** Only the pool holds that address's key, while
-    ///    anyone can write any tag; so a block tagged for one pool that pays another's address is
-    ///    the other's. Among payouts, the first in output order decides.
-    /// 2. **Otherwise the tag:** the longest list tag found anywhere in the script, ignoring ASCII
+    /// 1. **The tag wins:** the longest list tag found anywhere in the script, ignoring ASCII
     ///    case, so a pool whose tag contains another's (`/ViaBTC/TATMAS Pool/` holds `/ViaBTC/`)
-    ///    wins over it. Equal lengths: the one found first in the script, then the lower id.
-    /// 3. **Otherwise [`UNKNOWN`].** A tag claims a pool without proof: a block that writes a
-    ///    pool's tag and pays an address not on the list is that pool's, since pools change
-    ///    payout addresses more often than lists do.
+    ///    wins over it. Equal lengths: the one found first in the script, then the lower id. The
+    ///    tag is written by whoever built the block.
+    /// 2. **Otherwise a payout to a pool's address**, the first in output order. A payout only
+    ///    shows who got paid: P2Pool and TIDES pools pay their miners from the coinbase, so a
+    ///    listed solo miner's address in such a block does not make the block theirs.
+    /// 3. **Otherwise [`UNKNOWN`].**
     pub fn attribute(&self, tag: &[u8], payouts: &[ScriptBuf]) -> (u16, Method) {
-        if let Some(id) = payouts.iter().find_map(|s| self.by_script(s)) {
-            return (id, Method::Address);
-        }
         let mut best: Option<(usize, usize, u16)> = None;
         for (t, id) in &self.tags {
             if best.is_some_and(|(len, _, _)| t.len() < len) {
@@ -223,8 +219,11 @@ impl Pools {
                 best = Some((t.len(), pos, *id));
             }
         }
-        match best {
-            Some((_, _, id)) => (id, Method::Tag),
+        if let Some((_, _, id)) = best {
+            return (id, Method::Tag);
+        }
+        match payouts.iter().find_map(|s| self.by_script(s)) {
+            Some(id) => (id, Method::Address),
             None => (UNKNOWN, Method::None),
         }
     }
@@ -279,11 +278,13 @@ mod tests {
         assert_eq!((v2.id, v2.addresses.len()), (10000, 0));
         let jao = p.by_slug("jaonoctus").unwrap();
         assert_eq!((jao.id, jao.addresses.len()), (10001, 0));
+        let pleb = p.by_slug("sv2plebhash").unwrap();
+        assert_eq!((pleb.id, pleb.addresses.len()), (10002, 0));
         // Every address in the shipped list is a valid mainnet address.
         let listed: usize = p.all().iter().map(|p| p.addresses.len()).sum();
         assert_eq!(p.scripts.len(), listed);
         assert_eq!(list().version(), p.version());
-        assert!(p.version().starts_with("1-"));
+        assert!(p.version().starts_with("2-"));
     }
 
     fn hex(h: &str) -> Vec<u8> {
@@ -294,7 +295,7 @@ mod tests {
     }
 
     /// Testnet 5 block 4329 (`0000000000000038d4…7a8b`): its coinbase script and first 8 payouts.
-    /// The second pays jaonoctus's address, which stays off the list so this stays P2Poolv2.
+    /// The second pays jaonoctus's address; the tag decides, so listing it would not matter.
     #[test]
     fn p2poolv2_block_by_tag() {
         let tag = hex("02e91001000c9f579b58040000000000000008538548613d4be818085032506f6f6c7632");
@@ -353,24 +354,66 @@ mod tests {
         }
     }
 
+    /// Testnet 5 blocks 129 (`…8ca630eb`) and 4363 (`…be35072e`): coinbase `/Sv2/⛏️ plebhash ⚡//`,
+    /// paying the pool's own address, which the list leaves out.
     #[test]
-    fn address_beats_tag() {
+    fn plebhash_blocks_by_tag() {
+        let payouts = [ScriptBuf::from_bytes(hex(
+            "0014eb859601c3afef69055d0fc0e740aadfbc0d5fa1",
+        ))];
+        let upstream = Pools::parse(LIST).unwrap();
+        for tag in [
+            "028100195376322fe29b8fefb88f20706c65626861736820e29aa12f2f140100000000000000000000000000000000000000",
+            "020b11195376322fe29b8fefb88f20706c65626861736820e29aa12f2f140100000f00000000000000000000000000000000",
+        ] {
+            assert_eq!(list().attribute(&hex(tag), &payouts), (10002, Method::Tag));
+            assert_eq!(
+                upstream.attribute(&hex(tag), &payouts),
+                (UNKNOWN, Method::None)
+            );
+        }
+    }
+
+    #[test]
+    fn tag_beats_address() {
         let (p, s1, s2) = sample();
-        // Tagged Beta, pays Alpha: Alpha's.
+        // Tagged Beta, pays Alpha: Beta's.
         assert_eq!(
             p.attribute(b"/beta/", std::slice::from_ref(&s1)),
-            (3, Method::Address)
+            (4, Method::Tag)
         );
-        // The first payout that matches decides.
+        // No listed tag: the first payout that matches decides.
         assert_eq!(
-            p.attribute(b"", &[ScriptBuf::new(), s2.clone(), s1]),
+            p.attribute(b"", &[ScriptBuf::new(), s2.clone(), s1.clone()]),
             (4, Method::Address)
+        );
+        assert_eq!(
+            p.attribute(b"/nobody/", std::slice::from_ref(&s1)),
+            (3, Method::Address)
         );
         // Tagged Alpha, paying an address not on the list: Alpha's, by tag.
         assert_eq!(
             p.attribute(b"/alpha/", &[ScriptBuf::from_bytes(vec![0x51])]),
             (3, Method::Tag)
         );
+    }
+
+    /// A P2Pool block pays its miners from the coinbase; one of them having a listed address
+    /// does not take the block.
+    #[test]
+    fn p2pool_block_paying_a_listed_address_stays_p2pool() {
+        let (a1, s1) = p2pkh(1);
+        let json = serde_json::json!([
+            {"id": 10000, "name": "P2Poolv2", "addresses": [], "tags": ["P2Poolv2"], "link": ""},
+            {"id": 10001, "name": "Solo", "addresses": [a1], "tags": ["@solo"], "link": ""},
+        ]);
+        let p = Pools::parse(&json.to_string()).unwrap();
+        let payouts = [ScriptBuf::from_bytes(vec![0x51]), s1];
+        assert_eq!(
+            p.attribute(b"\x03\x08P2Poolv2", &payouts),
+            (10000, Method::Tag)
+        );
+        assert_eq!(p.attribute(b"", &payouts), (10001, Method::Address));
     }
 
     #[test]

@@ -24,7 +24,7 @@ Transactions settle out of the mempool into blocks the way sediment settles into
 5. **Explanations are a second layer.** The one sentence that changes what a number means stays beside it. Methodology and longer notes sit behind a disclosure ("How these figures are made") a keyboard reaches. Each thing is said once, where it matters most.
 6. **Motion explains a change.** Something moves only when the data changed or the user acted. One orchestrated moment per event, never ambient decoration.
 7. **The network is never ambiguous.** A test network shows a band with its warning in words, a recoloured logo and a recoloured network switch.
-8. **Chain data is text.** Transaction data, coinbase tags, OP_RETURN text and Lightning aliases are attacker-controlled. They are set with `textContent` and never parsed as HTML ([`SECURITY.md`](SECURITY.md) rule 14). The prototype builds every node with one helper that only creates text nodes.
+8. **Chain data is text.** Transaction data, coinbase tags, OP_RETURN text, inscriptions and Lightning aliases are attacker-controlled. They are set with `textContent` and never parsed as HTML ([`SECURITY.md`](SECURITY.md) rule 14). Nothing from the chain is ever drawn as an image: an inscription that is not text is named by its type and size. The prototype builds every node with one helper that only creates text nodes.
 9. **Sentence case everywhere.** No all-caps labels and no decorative eyebrows above headings.
 
 ## What to keep from the genre
@@ -195,13 +195,15 @@ An output is **Spent** (or **Being spent**, while the spending transaction is un
 
 - **In lists:** first eight and last eight characters with a middle ellipsis (`a3f9c2e1…7b0d44e9`), in the monospace cut. The full value is in the `title` and in the copy button.
 - **As a page subject** (block hash, txid, address): the full value in groups of eight at one contrast, wrapping cleanly at any width. A copy button sits at the end.
-- **Addresses** in the flow diagram: whole, wrapping, where the cards have room; seven and five characters on a phone.
+- **Addresses** in the flow diagram: on one line, cut in the middle only as far as the card needs (`Hash fit`), the last eight characters always whole.
 - **A short form never loses its end.** Where even `a3f9c2e1…7b0d44e9` or `mwLW3XD…UAuat` is wider than its room (a 320 px phone, a wide font), its head gives way, down to two characters and its "…" (`mwLW3…UAuat`); the tail stays whole.
 - **Copy button:** a 28 px drawn button in a 44 px target that takes only its room, kept clear of the link beside it. It copies plain text a program can read: a hash, address or key exactly as on the wire, an amount as digits and a point with no grouping and no unit, its unit named in the button's label ("Copy the exact balance, in BTC"). "Copied" rises above the button, never over the value it copied, inside any scrolling table so nothing clips it (below it in an exact amount's pop-up that opened below its figure). On press it turns positive, pops once, and the word "Copied" shows, at a readable size, while its label reads "Copied" for screen readers, for 1.4 s, only when the value was copied. When the browser copied nothing, its icon turns to a cross in the negative color, "Not copied" shows above it and "Could not copy" is announced, for 3 s.
 
 ### Time
 
 Relative time ("13 min ago", "1 day 23 h ago", "9 days ago": days lead from a day on) in lists, with the absolute UTC time in the `title`. Detail pages show absolute UTC first (`11 Nov 2026, 20:41:07 UTC`, the form chart read-outs use, there to the minute) and relative time below. Under 10 seconds is "just now". Block tiles drop "ago" to fit ("13 min").
+
+A block's time to mine (the Blocks page) is its time less its parent's, to the second under an hour ("9 min 12 s"). Under it, a bar as long as the time, full at 30 min, with a tick at the 10-minute average: `--color-line-strong` on `--color-line`, and `--color-caution` from 20 min, the one place caution marks a figure rather than a state, so a slow block stands out without a word in every row. Miners set block times, so one can come before its parent's: it keeps its minus sign. A slow time and a negative one are dotted, and explain themselves in a note (`Note`) on hover, focus or tap; a tile on the home strip timed before its parent gives the same note on its time, below the tile.
 
 ## Space, shape and layout
 
@@ -211,6 +213,7 @@ Relative time ("13 min ago", "1 day 23 h ago", "9 days ago": days lead from a da
 - **Sections are panels.** A `section` whose first child is a `SectionHeader` is a panel: `--color-surface`, a 1 px `--color-line` border, `--radius-l`, `--panel-pad` inside (`global.css`). A panel inside a panel is a group, not another card. Things that are not sections but read as one group take the class `panel` (the block's facts, its map). Headings sit at the top of the panel with no rule under them.
 - **Shadow:** `--shadow-panel`, a hairline in light and none in dark, under panels; `--shadow-pop` on floating things.
 - **Touch:** every control a thumb uses has a target of at least `--touch` (44 px) each way that no neighbour's covers. Small drawn buttons (copy, expand, theme) keep their size and get the target from an invisible margin on touch screens; so do links and figures in a line of text (`.tap` round a control, `.tap-line` on a line that cuts itself with an ellipsis, in `global.css`), so the target grows and the look does not. Exceptions, each meant: a link inside a sentence, which the words around it place; and a phone's flow card, three short lines with a control on each, whose address and spending links are also in the inspector its details button opens: they keep their line's height, so no target in the card reaches over another; and a node's channel card, whose first line's peer and channel are also under its chevron, a thumb's target there. `targets.e2e.ts` holds the rule on every page type.
+- **Sideways rows are moved by hand:** a row of tiles or choices that scrolls sideways (the block strip, the mining page's recent blocks, the period, view and chip rows, the header's sections on a phone) follows a mouse press and drag, and glides on and slows after a quick one, as a swipe does on a touch screen; under reduced motion it stops where the hand let go. A press that moves less than 6 px is still a click, a drag released over a link does not open it, and a modified click (Ctrl, Cmd, Shift, Alt) stays the browser's. The cursor is a grab hand over a row that has more to show. The tile rows hide their scrollbar: the wheel, a trackpad, a swipe and the keys still move them. Tables and text boxes do not drag, so their text selects as usual (`components/dragScroll.ts`).
 - **Tiles:** `--tile-w` 8.25rem, `--tile-h` 9.5rem, `--tile-gap` 0.75rem. Phones override them on the strip element.
 - **Breakpoints:** 65em (single column, the header's two rows) and 40em (phone): 1040 and 640 px at the default text size. They are in `em`, so a reader's larger text size moves the layout to the narrower form, as zoom does; below 18.75em (300 px, reached only by zoom or a large text size) the last two-column groups stack.
 
@@ -315,16 +318,17 @@ Decided while building it (`/block/next`, `/block/next/:n`), where the rest of t
 
 Decided while building it, where the rest of this document left it open. The page is where people land from a wallet, often worried, so it says exactly what the server knows and no more.
 
-- **Five words for where it is.** Unconfirmed (in the mempool), Confirmed, Replaced (another transaction spending the same coins took its place), Dropped (it left without being mined, for a reason the node does not report) and Removed (the node no longer has it and nothing says why). The timeline's middle step carries the same word with its detail; a replaced version's last step is "Will not confirm", struck through.
-- **Where it waits** sits above the fee, under the flow and beside the details. The projected blocks are a row of dashed slots running to a dashed "now" line, the next block nearest it, the last one "8+". The transaction is one square in the fee colour of the group it will be mined with. Under it, in words: "In the next block" (linked to that block's page), "In about 3 blocks", or "In more than 7 blocks"; how much would be mined before it; and what that means in time. A block is on average ten minutes away whenever one looks, and about one in seven takes more than twenty (an exponential wait), so the next block is said that way; later blocks get a rough figure ("~30 min") at the usual pace, with the condition that nothing paying more arrives; regtest says it has no schedule. A last, muted line says this is a projection, not a promise.
-- **Alive without twitching.** The square travels only when its block changes (`--dur-slow`, `--ease-in-out`); what is ahead of it changes in place. Nothing is announced for a position that only moves: only entering or leaving the next block, and every change of state, once, in a polite live region.
-- **The position bar of the prototype is not used.** The projection says which block a transaction is in, not a percentile of one, and the lane says that directly.
-- **Mined with.** When the rate it will be mined at prints differently from its own, an "Effective fee rate" fact joins the fee list, and under it the group: its members in mining order (this transaction, its child, its parent), each with its own rate and a link, eight at a time with a "Show all" button (this transaction always among them), one sentence saying who lifts whom ("On its own it pays 1.00 sat/vB, but its child pays enough to lift the group to 12.5 sat/vB as a whole") and one explaining why miners take such a group whole, naming child pays for parent last.
-- **Replaced** is a notice above the timeline, in the negative colour: what took its place, linked, with both rates and both fees, and that this version can no longer confirm. A longer chain is listed oldest first, and the newest version's own state ("It waits in the mempool: in the next block", "It confirmed in block 975 530") is followed live. Opened later, when the node says not found, the same notice comes from the server's record of replacements; when the record has nothing, the not-found state says the record is recent and holds nothing for it, and that the page will show the transaction if it is broadcast while open.
+- **Five words for where it is.** Unconfirmed (in the mempool), Confirmed, Replaced (another transaction spending the same coins took its place), Dropped (it left without being mined, for a reason the node does not report) and Removed (the node no longer has it and nothing says why), in the badge. After a replacement, a drop or a reorganisation the full timeline says how it came to this: its middle step carries the same word with its detail, and a replaced version's last step is "Will not confirm", struck through.
+- **Where it is** is the summary's first figure, with the block strip in small inside it. Waiting: "Projected", the block in a few words ("Next block", "~3 blocks", "7+ blocks", linked to that block's page), the strip, and "1 022 txs ahead" (its kvB in the title). The strip is the projected blocks as dashed slots running to a dashed "now" line, the next block nearest it, and the transaction one square in the fee colour of the group it will be mined with. Mined: "Block" and its height, linked, the square crossed into a solid block right of the line with the blocks found since between them and dashed slots for those still to come, six in all, and "1 of 6 confirmations" (a coinbase counts to its 100, "Spendable" after; the genesis coinbase is "Never spendable"). The home strip's rule: projected left and dashed, mined right and solid.
+- **The sentences sit behind one disclosure** under the summary, "How this changes" while it waits, "When it is final" once mined ("When it can be spent" for a coinbase): how much would be mined before it and what that means in time, that it is a projection, not a promise, and that it can be replaced until it confirms (full replace-by-fee). A block is on average ten minutes away whenever one looks, and about one in seven takes more than twenty (an exponential wait), so the next block is said that way; later blocks get a rough figure ("~30 min") at the usual pace, with the condition that nothing paying more arrives; regtest says it has no schedule. The figures above it each carry at most one short line.
+- **Alive without twitching.** The square travels only when its block changes (`--dur-slow`, `--ease-in-out`); what is ahead of it changes in place. Each new block moves the mined strip on by one. Nothing is announced for a position that only moves: only entering or leaving the next block, and every change of state, once, in a polite live region.
+- **The position bar of the prototype is not used.** The projection says which block a transaction is in, not a percentile of one, and the strip says that directly.
+- **Mined with.** When the rate it will be mined at prints differently from its own, the fee rate's figure adds one line, "Effective 12.5 sat/vB", and the side panel's details end with the group: its members in mining order (this transaction, its child, its parent), each with its own rate and a link, eight at a time with a "Show all" button (this transaction always among them), one sentence saying who lifts whom ("On its own it pays 1.00 sat/vB, but its child pays enough to lift the group to 12.5 sat/vB as a whole"), and behind "Why" why miners take such a group whole, naming child pays for parent last.
+- **Replaced** is a notice under the summary, above the timeline, in the negative colour: what took its place, linked, with both rates and both fees, and that this version can no longer confirm. A longer chain is listed oldest first, and the newest version's own state ("It waits in the mempool: in the next block", "It confirmed in block 975 530") is followed live. Opened later, when the node says not found, the same notice comes from the server's record of replacements; when the record has nothing, the not-found state says the record is recent and holds nothing for it, and that the page will show the transaction if it is broadcast while open.
 - **Dropped** is a notice that lists what it may have been (pushed out by fees, expired, made invalid by a reorganisation, or replaced by a transaction the server did not see) and that it will not confirm unless broadcast again. It never says "replaced".
-- **The happy moment** is the existing one: the "Confirmed" step's marker lands with `--ease-settle` over `--dur-slow`, once, and the live region says "Confirmed in block N." Reduced motion keeps only the change.
+- **The happy moment:** when it confirms while the page is open, the square crosses the "now" line and lands in its block with `--ease-settle` over `--dur-slow`, once, and the live region says "Confirmed in block N." Reduced motion keeps only the change.
 - **Back from a reorganisation** is a caution notice ("Back in the mempool") naming the block that held it, saying it waits to be mined again and can be replaced meanwhile, until it confirms again.
-- **Not live, quietly.** Beside the badge, an icon and a word: "Live" (a breathing dot), "Connecting", or "Not live" / "Node not answering" with what the page does instead ("Checking every 10 s instead."). Without the live channel there is no position to vouch for, so the panel says the place in the queue shows while the page is live; with the mempool engine off on the network the panel is left out. A settled transaction shows no indicator: nothing on it can change.
+- **Not live, quietly.** Beside the badge, an icon and a word: "Live" (a breathing dot), "Connecting", or "Not live" / "Node not answering" with what the page does instead ("Checking every 10 s instead."). Without the live channel there is no position to vouch for, so the figure reads "–" with "Shows while live" (its sentence in the disclosure); with the mempool engine off on the network, "Not followed here". A settled transaction shows no indicator: nothing on it can change.
 - **The address page** shows "Live" under its header while the node watches the address, and otherwise says plainly that the page does not update by itself and why (too much history to watch, the node watching as many addresses as it can, the node out of reach), never as an error.
 
 ## Components
@@ -336,23 +340,23 @@ Decided while building it, where the rest of this document left it open. The pag
 | Logo | `design/logo.svg`, also the favicon: a crab, a nod to Rust and to rbitcoin's own crab, lifting a block of three strata, the top layer shorter, offset and in the accent, still settling. In the header it is inline SVG, 32 px: the crab and the two settled layers in `--color-network`, the top layer in `--color-accent` on every network. The wordmark is live text, so a new name is one string |
 | Block tile | Projected (dashed) or mined (solid). Height or label, median fee, fee range, total fees (in magnitude), its fee layers, transaction count and age. Mined tiles link to the block and show the pool below |
 | Tile layers | The block's capacity as a box, its fee bands settled from the floor, cheapest at the bottom, each as thick as the virtual size paying it (`strataLayers`); the room above is room the block left. Until the block's facts arrive, a neutral gauge of the same height stands in |
-| Block strip | Projected lane, "now" line, mined lane. Scrolls sideways inside itself and starts centred on the line; the mined lane goes on into the past down to block 0, and "← Now" in its head brings the line back ([`FRONTEND.md`](FRONTEND.md#the-block-strips-past)) |
-| Fee answers | "Fee to pay now": up to four plainly labelled rates, slowest first (No rush, Low, Medium, High), each with its unit and what it promises (within a day, within an hour, within 30 min, next block), rounded up. Levels next to each other that print the same rate are one answer ("No rush or low"), never stacked labels, laid out in the same two rows of two whatever merges: Low and Medium alone are never merged, a lone answer beside three takes its row, and one answer for every wait ("Any wait") is one tile across the row, the panel no taller than it, its line of text saying the next block has room at that rate. In sunken wells |
-| Waiting by fee rate | The home page's mempool: one line saying the fee rate the next block's worth reaches down to, then, behind "By fee rate" (open on wide screens, closed on a phone), a row per band, dearest first: its range, a bar on a log scale from 100 vB to one block's worth (a band past a block fills its bar, the end cut), its size, and how many blocks deep the queue is by the end of that band |
+| Block strip | Projected lane, "now" line, mined lane. Scrolls sideways inside itself, by a drag, a swipe, the wheel or the keys with no scrollbar, and starts centred on the line; the mined lane goes on into the past down to block 0, and "← Now" in its head brings the line back ([`FRONTEND.md`](FRONTEND.md#the-block-strips-past)) |
+| Fee answers | "Fee to pay now": up to four plainly labelled rates, slowest first (No rush, Low, Medium, High), each with its unit and what it promises (within a day, within an hour, within 30 min, next block), rounded up. Levels next to each other that print the same rate are one answer ("No rush or low"), never stacked labels. Wide, one row of four, an answer for several levels as wide as they are; on a phone two rows of two whatever merges: Low and Medium alone are never merged, a lone answer beside three takes its row, and one answer for every wait ("Any wait") is one tile across the row. A line under them only when it changes what they mean: the node's estimates, or one answer for every wait (the next block has room at that rate). In sunken wells |
+| Mempool panel | The home page's mempool, each part a fixed height: the next projected block's map, read-only (no Highlight), headed by a link to its page and the fee rate the next block's worth reaches down to; the four figures, two by two; and what has been arriving, in vB a second over the last two hours, as a line chart. Side by side on wide screens, stacked on narrower ones. The map and chart load once the panel nears the view. The size by fee band is on `/mempool` |
 | Fee key | Twelve swatches with lower bounds, in one row where their labels fit and two rows of six where they do not (the test is in the labels' own font). Beside a drawing that needs one (the block map, a projected block), never repeated where the figures already name the bands |
 | Fee chip | A number and its unit, with a swatch only where it is the key to a drawing (`FeeRate swatch`) |
 | Amount | BTC with dimmed trailing zeros, sats on hover; `short` for a summary's magnitude |
 | Hash | Truncated or grouped, monospace, with copy; `whole` wraps the full value |
 | Stat | Label above a figure, optional muted sub-line |
 | Fact list | `dl` of label and value pairs, two columns or one |
-| Summary | The transaction page's answer: Status, Fee, Amount and Block (or First seen), four label-value pairs in a panel. On a phone, status and fee share a row and the amount has one of its own, so thousands of bitcoin in eight decimals fit 320 px in any face |
+| Summary | The transaction page's answer: four figures in a panel, each a label, a value and one muted line: where it is (the block strip in small), fee rate (sats and vsize), amount (inputs to outputs), and first seen or mined. Each at least as wide as its figure; on a phone two by two, a wide amount on a row of its own. The broadcast page's three figures (fee, amount, size) are label-value pairs of the same kind |
 | Table | Units in headers, bare numbers in cells, numeric columns right-aligned in the monospace, a gutter on both sides of every column, row rules. Phones drop the least important columns and may show a shorter header (`short`). A list's row is one target: a tap anywhere on it opens its item, the cells' own links and buttons staying on top and the row link hidden from the keyboard and screen readers. Identifiers in a list take as much of their column as it allows, cut in the middle only when they must |
 | More | The second reading layer: a disclosure ("How these figures are made", "How this changes", "Why") holding methodology and longer notes, under the one sentence that stays visible |
 | Lightning nav | Lightning's own way around: Overview, Rankings and History (the overview's chart, by an anchor) in one short row above the title, and on a node or channel a "←" link back to the list the reader came from, a search's results included |
 | Packed map | Rectangles sized by vsize and coloured by fee band, the dearest at top left, one clean block on the floor of the frame ([The transaction grid](#the-transaction-grid)). Tooltip on hover, click opens the transaction, rows in the table below ring their rectangle. Comes with a caption and the fee key; the table is its text alternative |
-| Flow diagram | Inputs on the left, outputs on the right, ribbons as thick as the value they carry, meeting at a bar that is the transaction. The fee leaves as its own ribbon in its fee colour. A card shows its exact amount; where that is wider than the card (a phone, a wide font, a thousand bitcoin and more) it reads in magnitude, the exact amount in its title and the inspector |
+| Flow diagram | Inputs on the left, outputs on the right, ribbons as thick as the value they carry, meeting at a bar that is the transaction. The fee leaves as its own ribbon in its fee colour. A card is a two-line ledger row: the address (cut in the middle as the card needs) and the exact amount, then the script type and whether it is spent; on a phone three short lines, the amount first, and both columns start at the top. Where the exact amount is wider than the card (a phone, a wide font, a thousand bitcoin and more) it reads in magnitude, the exact amount in its title and the inspector. Text on the chain has a line of its own under the ledger row, behind a dashed rule, in the body colour and in quotes, cut after two lines (three on a phone): a coinbase's words on the coinbase card, an OP_RETURN's text on its output, an inscription's text on the input that reveals it, after a quiet "Inscription". An inscription that is not text reads "Inscription, image/png, 793 B" there, and an OP_RETURN that is not text "OP_RETURN, 44 bytes" in the name. Each card's button opens its inspector: in the side panel beside the flow on a wide screen (the chevron points right), under the flow on a narrower one |
 | Status badge | Pill with icon and word: Confirmed (check), Unconfirmed (dashed circle), Replaced, Dropped and Removed (cross) |
-| Timeline | Numbered steps: first seen, replaced or replacing, waiting or confirmed. While waiting and once confirmed it is one line of words, the summary and "Where it waits" holding the rest; after a replacement, a drop or a reorganisation it is the full sequence, horizontal on wide screens and vertical on phones. A version that can no longer confirm is struck through with a dashed marker |
+| Timeline | Numbered steps: first seen, replaced or replacing, waiting. Only after a replacement, a drop or a reorganisation, when the badge and the summary alone would not say how it came to this; horizontal on wide screens and vertical on phones. A version that can no longer confirm is struck through with a dashed marker |
 | Notice | Bordered strip for important state, such as "This version was replaced" with a link to the replacement |
 | Tooltip | Raised surface, title line and muted detail lines. Opens on hover and keyboard focus |
 | Buttons | Default (outlined) and accent (filled). Toggles use `aria-pressed` and show a dot when on. 44 px tall on touch screens |
@@ -367,21 +371,24 @@ Decided while building it, where the rest of this document left it open. The pag
 │ Blocks   ┆ projected ▭ mined ■                                 Live │
 │ [+11][~30m][~20m][Next] ┆now┆ [975411][975410][975409][975408] …   │
 ├─────────────────────────────────────────────────────────────────────┤
-│ ┌ Fee to pay now ──────────┐  ┌ Mempool ─────────────────────────┐ │
-│ │ No rush       Low        │  │ Transactions  Size  Fees  Lowest │ │
-│ │ 0.14 sat/vB   0.22 sat/vB│  │ Waiting, by fee rate             │ │
-│ │ Medium        High       │  │ 10+      ▏           16.59 kvB   │ │
-│ │ 0.27 sat/vB   3.29 sat/vB│  │ …                                │ │
-│ └──────────────────────────┘  │ < 0.2    ██████████  28.72 MvB   │ │
-│ ┌ Difficulty adjustment ───┐  └──────────────────────────────────┘ │
-│ │ [██████████████░░┃░░]    │  ┌ Latest transactions ─────────────┐ │
-│ └──────────────────────────┘  └──────────────────────────────────┘ │
+│ ┌ Fee to pay now ───────────────┐ ┌ Difficulty adjustment ────────┐ │
+│ │ No rush  Low    Medium  High  │ │ [████████░┃░░░░░░] 398/2016   │ │
+│ │ 0.14     0.22   0.27    3.29  │ │ ↑ Up 14.9%  in 9 days  ↓ 9.1% │ │
+│ └───────────────────────────────┘ └───────────────────────────────┘ │
+│ ┌ Mempool ─────────────────────────────────────── Mempool history ┐ │
+│ │ Next block  1–1.5   │ Transactions Size │ Arriving 902 vB/s     │ │
+│ │ ┌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┐ │ 74 179  31.77 MvB │   ╲__/‾‾╲___          │ │
+│ │ ╎ next block map  ╎ │ Fees    Lowest    │                       │ │
+│ │ └╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┘ │ 0.079   0.10      │ 14:57       15:06     │ │
+│ └─────────────────────────────────────────────────────────────────┘ │
+│ ┌ Latest transactions ──────────┐ ┌ Recent replacements ──────────┐ │
+│ └───────────────────────────────┘ └───────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-The fee to pay is the first panel after the blocks, so a phone shows it on its first screen. The difficulty bar is neutral (never a fee colour); its mark is where the period would be at one block every ten minutes. Changes read as an arrow and a word ("Down 7.05%"). On a network that never retargets (regtest) the section says so instead.
+The fee to pay is the first panel after the blocks, so a phone shows it on its first screen. The difficulty bar is neutral (never a fee colour); its mark is where the period would be at one block every ten minutes, and the sentence saying how far ahead or behind is the bar's title, not a line of its own. Changes read as an arrow and a word ("Down 7.05%"). On a network that never retargets (regtest) the section says so instead.
 
-Wide screens: the fee answer and the difficulty stacked beside the mempool, about its height, and the latest transactions across the width below. Phones: one column, in the order fees, mempool, latest transactions, difficulty; the strip scrolls sideways; stats in two columns.
+Wide screens: the fee answers and the difficulty in one short row, the mempool across the width, then the latest transactions beside the recent replacements, six rows each with ids cut in the middle, so the top of every panel is on a 1440 × 900 screen's first view. Phones: one column, in the order fees, mempool, latest transactions, difficulty, replacements; the strip scrolls sideways; stats in two columns.
 
 ### Block
 
@@ -402,29 +409,31 @@ Block 975 411
 Audit, then Transactions (in block order, the coinbase first)
 ```
 
-The facts come first in reading order; on a phone the map follows them, then the details.
+The facts come first in reading order; on a phone the map follows them, then the details. The coinbase tag reads as its words ("Mined by Luxor", "/F2Pool/"), the same reading as the transaction page's coinbase card; a coinbase with no words shows every visible character, dots for the rest, or its hex.
 
 ### Transaction
 
 ```text
-Transaction  (✓ Confirmed)
+Transaction  (◌ Unconfirmed)  • Live
 65428488 a6202f1d 681d053b …  [copy]
-┌ summary: Status · Fee · Amount · Block ──────────────────────────┐
+┌ summary ─────────────────────────────────────────────────────────┐
+│ Projected        Fee rate        Amount           First seen     │
+│ Next block       1.00 sat/vB     0.03169119 BTC   just now       │
+│ ┆┆┆┆┆┆┆■┆ now    141 sats, 141 vB 1 input to 2 …  17 Nov, 14:25  │
+│ 45 txs ahead                                                     │
 └──────────────────────────────────────────────────────────────────┘
-[notice: this version was replaced → replacement txid]   (replaced only)
-① Broadcast  ② Confirmed  ③ Six confirmations 3 of 6     (one line once confirmed)
-┌ Inputs and outputs ──────────────────────────────────────────────┐
-│ [input]  ═══╗                    ╔═══ [output]                   │
-│ [input]  ═══╣      ┃trunk┃       ╠═══ [output]                   │
-│             ╚════════════════════╚~~~ [fee]                      │
-└──────────────────────────────────────────────────────────────────┘
-┌ Where it waits (unconfirmed) ┐ ┌ Details ──────────────────────────┐
-│ Fee: rate, effective rate,   │ │ Version, witness, lock time,      │
-│ fee, vsize, weight, size     │ │ raw transaction                   │
-└──────────────────────────────┘ └───────────────────────────────────┘
+› How this changes                       (When it is final, once mined)
+[notice: replaced, dropped, back in the mempool]   (only then, with the full timeline)
+┌ Inputs and outputs ─────────────────────────┐ ┌ Details (sticky) ──┐
+│ [addr…  0.031 ›] ═╗          ╔═ [addr… 0.03 ›]│ │ Size, weight,      │
+│                   ╠══┃trunk┃═╣  [addr… 0.00 ›]│ │ replaceable,       │
+│                   ╚══════════╚~ [Fee   0.00  ]│ │ version, witness,  │
+└─────────────────────────────────────────────┘ │ lock time, raw hex,│
+                                                │ mined with         │
+                                                └────────────────────┘
 ```
 
-The flow takes the page's width, so an address fits its box on one line; the fee and the details share the row under it. While unconfirmed, the full timeline stays, with where it waits above the fee. Long input or output lists collapse after ten; each "Show more" adds a hundred, and the hidden rest travels as one ribbon, so a transaction with thousands of outputs never renders them all at once.
+Once mined, the first figure is "Block 976 283" over the strip with the square past the "now" line in a solid block ("3 of 6 confirmations"), and the last is "Mined". The flow sits beside a sticky side panel holding the facts the summary does not: size, weight, replaceable, what it replaced, version, witness, lock time and the raw hex ("Show" opens it in place), then who it is mined with. Opening a card's details shows its inspector in that panel, over the details, in the room they held, so nothing on the page moves on a wide screen; "Close" brings the details back. Text on the chain reads whole in the inspector, in a sunken well in the reading font ("Coinbase text", "OP_RETURN text", "Inscription text"); an inscription adds an "Inscription" fact, its content type and size, with "not shown" when it is not text. "Block height in script" shows only when the script carries the block's own height. Under 65em the panel moves under the flow and the inspector opens above the details, in the page's flow. Long input or output lists collapse after ten; each "Show more" adds a hundred, and the hidden rest travels as one ribbon, so a transaction with thousands of outputs never renders them all at once. Each fact is said once: the fee in sats and the virtual size under the fee rate, the fee in BTC on the flow's fee card, the counts of inputs and outputs under the amount. The Lightning note, for a transaction that opened or closed a channel, follows the flow and the panel.
 
 ### Address (not in the prototype)
 
@@ -469,39 +478,33 @@ One that does not check out says which check failed (checksum, version, length, 
 ```text
 Mining                                        [24 h | 1 w | 1 m | 1 y | All]
 (network note: signet, testnet4, regtest)
-The network now ═══════════════════════════════════════════════════════════
-Hashrate   Difficulty        │ Next difficulty adjustment (the home panel's)
-Hashrate and difficulty ═══════════════════════════════════════════════════
-[area: hashrate; dashed step: difficulty, right axis]
-Pools ═════════════════════════════════════════════════ 895 blocks in the last week
-rank  pool  share bar  blocks  hashrate  empty │ Share of blocks, week by week
-...                                           │ [stacked strata, biggest at the bottom]
-Rewards ═══════════════════════════════════════════════════════════════════
-Paid to miners   New coins   Fees   Per block
-Blocks over time ══════════════════════════════════════════════════════════
-[Fees | Rewards | Fee rates | Size]  one chart at a time
-Block health ══════════════════════════════════════ 158 audited blocks in the last week
-18% audited, from 12 Nov, 11:21 UTC.   [area: match rate per block, 0–100%; gaps]
-Difficulty adjustments ═══════════════════════════════════════════ Every 2 016 blocks
-Next, expected ↓ Down 8.41% at block 975 744, in 8 h
-block  when  ↑ Up 5.54%  difficulty                       [Show all 483 adjustments]
-Recent blocks ═════════════════════════════════════════════════ All blocks
-the same mined tiles as the strip, in a wrapping grid
+┌ Hashrate  Difficulty  Next adjustment ━━━━┿━  │ Blocks found  Paid to miners  Fees ┐
+Hashrate and difficulty ═════ Daily 7-day avg │ Pools ════════ 971 blocks in the last week
+[area: hashrate; dashed step: difficulty]     │ [share bar: six pools and the rest]
+                                              │ ■ pool  share  blocks  hashrate  match
+Blocks over time  [Fees|Fee rates|Size|Match rate|Pool shares]   (eight, then all)
+[one chart at a time]                         │ Difficulty adjustments ══ Every 2 016 blocks
+                                              │ block (age)  ↑ Up 5.54%  difficulty (six)
+Recent blocks ═════════════════════════════════════════════════════════ All blocks
+the same mined tiles as the strip, in one row
 ```
 
 Decided while building it, where the layout above left it open:
 
 - **The period is in the address** (`/mining?period=1m`), so a view can be linked; a week is the default. "All" joins the design's four periods, for the whole of history. The period is a row of links, the current one raised with an accent underline.
 - **Charts are drawn in the series colours, never fee colours:** the main series a solid `--series-1` line over a pale area, a second series a dashed `--series-2` line on its own right-hand scale. The one exception is the fee-rate chart, whose axis carries the fee scale as its key.
-- **Pool shares over time are strata.** Each pool is a layer, the biggest at the bottom, in its pool colour with a seam of the panel between them. The six biggest pools have their own layer and colour and the rest are one, "Other pools", in grey. The layer under the pointer turns the accent. Shares over time are weekly, so that chart appears from a month up; for 24 hours and a week the same place shows the period's shares as one bar, in the same shades, each pool named with its share.
-- **Summaries in magnitude.** Rewards read `2 793 BTC`, the exact amount in the title; the pool table's estimate of how a pool's hashrate is made sits behind "How these figures are made".
-- **Hashrate needs a week.** Each daily point averages the 7 days before it, so the 24-hour view draws the last week and says why.
+- **Figures first, in one band.** The network now (hashrate, difficulty with its last change, the next adjustment's expected change over a bar of the retarget period with a tick at the ten-minute pace), a rule, then the period's own (blocks found against the ten-minute target, paid to miners, fees). Three to a row under 80em, two on a phone, where the band and the whole hashrate chart are the first screen.
+- **Two columns on a desktop.** Charts on the left (7/12), the lists that explain them on the right (5/12): pools beside the hashrate, adjustments beside the block charts. Under 65em one column, in the order hashrate, pools, block charts, adjustments. Charts are 220 and 200 px tall on a desktop, 170 and 160 on a phone. Recent blocks are one row of ten tiles under both, which a phone scrolls sideways.
+- **The pools' share is one bar, at every period,** over the table, which is its key: each row repeats its pool's colour in a swatch. Eight rows, then all of them a press away. Columns are share, blocks, an estimated hashrate (dropped on a phone) and the match rate of the pool's audited blocks; empty blocks are a quiet "N empty" beside a name only when there are some.
+- **Pool shares over time are strata,** a tab of the block charts from a month up, since they are counted by the week. Each pool is a layer, the biggest at the bottom, in its pool colour with a seam of the panel between them. The six biggest pools have their own layer and colour and the rest are one, "Other pools", in grey. The layer under the pointer turns the accent.
+- **Summaries in magnitude.** Rewards read `2 793 BTC`, the exact amount in the title; how a pool's hashrate and match rate are made sits behind "How these figures are made". Totals cover at most the last 52 560 blocks, about a year, and say so.
+- **Hashrate needs a week.** Each daily point averages the 7 days before it, so the 24-hour view draws the last week, and its caption says so.
 - **Coverage is drawn, not hidden.** Where the server has not stored the start of the period yet, the chart keeps the whole period's width and hatches the part with no data ("No data stored"), and a note above says "Data from 22 Sep 2026 onward". The same hatch is the note's swatch. A period with nothing stored says so and offers all of history.
 - **One readout, no tooltip.** Above each plot a line at a fixed height shows the point under the pointer (the latest otherwise): its time and every figure with its key. It never covers the data, works the same for touch and keys, and never moves the page. On a phone a stacked fee chart reads out its totals only, and the one band under the finger on a line held for it, which says "Tap a layer to name it" until then; every band is in the figures table.
-- **The second level is a switch,** not more charts: fees, rewards, fee rates and size share one chart slot under "Blocks over time", so the page stays one screen of figures and one of charts.
-- **Block health is what was watched.** Only blocks this server saw arrive have an audit, so the chart counts them in its caption, says what share of the period's blocks they are and since when, hatches the time before the first and breaks wherever a block has none. The area stands on an axis from zero, so a bad block is a notch down from the top and an ordinary period a full band; past 1,000 blocks a point is the lowest of its run, so a bad block is never averaged away. A point opens its block: a click, a second tap, or Enter.
-- **Past adjustments are a list, not a period's.** The latest ten, newest first, each opening the block that began its period, with all of them a press away, under the next one's expected change; ups and downs read as an arrow and a word, never a colour. They sit after the block charts, so the page still opens on the network now.
-- **Unknown is a pool.** It is ranked like any other, its page exists, and its row says it is the blocks no tag or address on the list names.
+- **The second level is a switch,** not more charts: fees, fee rates, size, match rate and pool shares share one chart slot under "Blocks over time", the switch a segmented row in the panel's head (one row that scrolls sideways on a phone, its far edge faded). Reward per block is not one of them: it is the subsidy plus fees, a nearly flat line, so fees carry the variation and the band the totals. The chart chosen stays chosen for the visit, so coming back from a block a point opened shows the same one.
+- **Block health is what was watched,** the "Match rate" tab. Only blocks this server saw arrive have an audit, so a line over the chart says what share of the period's blocks they are and since when, hatches the time before the first and breaks wherever a block has none. The area stands on an axis from zero, so a bad block is a notch down from the top and an ordinary period a full band; past 1,000 blocks a point is the lowest of its run, so a bad block is never averaged away. A point opens its block: a click, a second tap, or Enter.
+- **Past adjustments are a list, not a period's.** The latest six, newest first, each block's age under its height, each row opening the block that began its period, with all of them a press away; the next one is a figure in the band. Ups and downs read as an arrow and a word, never a colour.
+- **Unknown is a pool.** It is ranked like any other, its page exists, and "How these figures are made" says it is the blocks no tag or address on the list names.
 - **Test networks say what their figures mean.** Signet's blocks come from a few signers the list does not name; testnet4's minimum-difficulty rule makes its hashrate swing; regtest has no pools, a meaningless hashrate and no retargets; Testnet 5's figures read as mainnet's, so it has no note. A note under the title says so, and figures that mean nothing there say "Not meaningful on regtest".
 - **A pool's page** has its name as the title (dataset text), its site as a plain link only when it is `http` or `https`, its blocks and shares, its weekly share and hashrate, and its blocks 25 at a time.
 - **Nothing moves as it loads.** Each section holds the height its content will take; the coverage notes on a pool's page sit below its figures.
@@ -509,24 +512,35 @@ Decided while building it, where the layout above left it open:
 ### Mempool history (not in the prototype)
 
 ```text
-Mempool history                     [2 h | 24 h | 1 w | … | 4 y | All]
-(coverage sentence, with the hatch as its swatch, when minutes are missing)
-Waiting, by fee rate ════════════════════════════════ One point a minute
-readout: time, total, transactions, lowest accepted, each band
-[stacked areas in the fee colors, cheapest at the bottom; total as a line]
-fee key
-Flow ═══════════════════════════════════════════════════ vB a second
-Over the last 24 hours, 2 983 vB/s arrived, blocks took …: it filled by …
-[line: arrived; stacked shades: mined, left otherwise]
+Mempool history  21% recorded, from 12 Nov, 11:14 UTC.   [2 h | 24 h | 1 w | … | 4 y | All]
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│ Waiting now      │ Change          │ Arriving              │ Next block reaches      │
+│ 32.67 MvB        │ −793.87 kvB     │ 1 244 vB/s            │ 2 sat/vB                │
+│ 78 902 txs       │ peak 34.66 MvB  │ blocks took 1 217 vB/s│ the dearest 1 MvB, now  │
+│──────────────────────────────────────────────────────────────────────────────────────│
+│ [stacked fee layers, cheapest at the bottom]             ┆ 17 Nov, 01:00 UTC         │
+│                                                          ┆ 32.67 MvB                 │
+│                                                          ┆ 78 902 tx, from 0.10      │
+│ Flow, vB/s: arrived and left                             ┆ By fee rate  [From 0.15 up]│
+│ [line: arrived; shades: mined, left otherwise]           ┆ ■ 10+        16.46 kvB    │
+│ one time axis                                            ┆ …  ■ Arrived  862 vB/s    │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+> How these figures are made
+> Show the figures
+Recent replacements ═════════════════════════════════════════════════ All replacements
 ```
 
-- **The mempool is the core sample laid on its side,** as pool shares are, but its layers are fee bands, so here they take the fee colors: color still carries fee and nothing else. The layer under the pointer turns the accent.
-- **Flow is its own chart,** not a second axis on the first: its units are a rate, and the question it answers (filling or draining) is read from where the line sits against the layers. A sentence above gives the period's answer in words.
-- **Honest about coverage,** as the mining charts are: a break wherever a step was not sampled (a lone minute is a sliver), and a sentence saying how many of the period's minutes are here and since when.
-- **Opens on what is recorded, and says so in its choices.** With no period in the address, a view whose records begin inside it starts where they do, under one line ("Recorded since …"; the Lightning overview says "Everything recorded, since …"), and the period choices gain "Recorded", marked as the current one: a period's name always means its whole width, so choosing "24 h" shows the whole day, the time before the records hatched ("No data stored"). The same holds on the Lightning overview. The fee key is not repeated under the chart: its readout names every band, and on a phone only the bands holding anything at that point.
+- **One panel answers.** Four figures across its top, the plot under them. They are what the record can honestly say: what waits now and in how many transactions; how that changed over the period, with its peak; what arrived against what blocks took; and the rate the dearest block's worth now reaches down to ("Next block reaches", the cheapest band the dearest 1 MvB waiting reaches into). The record keeps no block's lowest rate, so it never claims one.
+- **The mempool is the core sample laid on its side,** as pool shares are, but its layers are fee bands, so here they take the fee colors: color still carries fee and nothing else. No total line: the top of the stack is the total. The layer under the pointer keeps its colour and takes an outline in the text colour while the others fade; the accent is never drawn in a plot.
+- **Size and flow share one time axis and one crosshair,** the size above, the flow below in its own strip and units (vB a second): a line for what arrived over shades for what blocks mined and what left otherwise, so where the line sits against the shades says filling or draining. A minute holds one block or none, so under ten-minute steps the flow reads in ten-minute means; coarser steps are drawn as recorded.
+- **The key is the readout and the filter.** Beside the plot on a desktop, under it on a phone, it names each band with its figure at the crosshair (the latest point until the pointer, a finger or the keys move it), under the crosshair's time, total, count and lowest accepted rate, and the flow's three figures after it. A band pressed shows it and every dearer band on their own scale, the rest drawn as empty swatches; "From 0.15 up" offers the band above where nine tenths of the latest point lie, worked out from the data, so the block-by-block clearing over a cheap slab shows in one press. "Show all" undoes it. The rows keep their place, so nothing moves as the crosshair does.
+- **Explanations are a second layer.** "How these figures are made" holds one short line each for the layers, the flow and "Next block reaches"; "Show the figures" opens every point as a table. Both sit under the panel, so opening them never changes it.
+- **Honest about coverage,** as the mining charts are: a break wherever a step was not sampled (a lone minute is a sliver), and one muted line beside the title saying how many of the period's minutes are here and since when.
+- **Opens on what is recorded, and says so in its choices.** With no period in the address, a view whose records begin inside it starts where they do, under one line ("Recorded since …"), and the period choices gain "Recorded", marked as the current one: a period's name always means its whole width, so choosing "24 h" shows the whole day, the time before the records hatched ("No data stored") across both strips, the line beside the title keyed with the same hatch.
 - **A few missing minutes are bridged.** Up to five missing steps are drawn across rather than as thin stripes that look like faults; a longer pause in recording breaks the line, and the figures table lists only what was stored.
-- **A phone's time axis names its ends:** too narrow for ticks a reader can place, a chart labels its first and last moment instead ("9 Nov", "12 Nov"; "12 Nov 11:14", "20:35").
-- **The intervals are one row** on a phone, scrolling sideways with their far edge faded and the chosen one in sight, so the chart and its time axis are on the first screen. The coverage is one short line ("49% recorded, from 12 Nov, 11:14 UTC.", the year said only when it is not this one).
+- **A phone's time axis names its ends:** too narrow for ticks a reader can place, a plot under 420 px labels its first and last moment instead ("9 Nov", "12 Nov"; "12 Nov 11:14", "20:35").
+- **The intervals are one row** on a phone, under the title, scrolling sideways with their far edge faded and the chosen one in sight; the coverage is one short line under them ("49% recorded, from 12 Nov, 11:14 UTC.", the year said only when it is not this one), the figures two by two, and both strips and their time axis end on the first screen. The key's bands are three to a row of 44 px targets.
+- **Live.** The page asks again just after each new minute is stored; the crosshair holds the moment it was put on.
 
 ### Replacements (not in the prototype)
 
@@ -546,27 +560,24 @@ Decided while building it:
 - **The answer per row** is at its right end: how much the rate rose (or fell: a replacement can pay more in all over more bytes), and whether the version that stands was mined, as an icon and a word: Mined (positive), Not mined (caution), Unknown (muted, after a reorg took its block away), with how long ago it arrived under it.
 - **On a phone** the story runs down the row, each version on its own line and the time it stood between them on a short rule; the rise drops first when the table does not fit.
 - **Live without moving the reader.** A new story comes in at the top with the row flash; a reader scrolled into the list keeps the story they read where it was.
-- **Where it sits.** The header's Mempool is current on `/rbf`, which has a "← Mempool history" link above its title; the mempool's own pages are two, so they get no row of tabs (on a phone it would push the history chart off the first screen). The recent replacements panel, the newest five, is the home page's last panel, below everything the council placed, and the foot of `/mempool`: the way to `/rbf` from both. On the narrowest phones its row gives way before its status does: the id's header reads "Tx", the id shortens, and the rate it rose to goes under the one it rose from, so "Not mined" is always whole.
+- **Where it sits.** The header's Mempool is current on `/rbf`, which has a "← Mempool history" link above its title; the mempool's own pages are two, so they get no row of tabs (on a phone it would push the history chart off the first screen). The recent replacements panel, the newest five, is the home page's last panel, below everything the council placed, and the foot of `/mempool`, under its panel: the way to `/rbf` from both. On the narrowest phones its row gives way before its status does: the id's header reads "Tx", the id shortens, and the rate it rose to goes under the one it rose from, so "Not mined" is always whole.
 
 ### Lightning (not in the prototype)
 
 ```text
-Lightning              (nodes and channels are found from the header's search)
-[24 h | 1 w | 1 m]     (one period for the totals, the movers and the chart)
-The network now ═════════════════════════════════════════ As of 12 Nov, 18:30 UTC
-Channels  Nodes  Capacity  Median fee rate  Median base fee   (each: ↑ Up 28 (0.1%))
-As it happens ═══════════════════════════════════════════════════ ● Live [Pause]
-[All | Opens | Closes | Fee changes]   Since 14:02 UTC: 2 opened, 1 closed, 412 fees moved
-kind │ channel │ capacity, or fee from → to │ node ↔ node │ when      (30 rows, its own box)
-Movers ═══════════════════════════════════════════════ Net change, the last week
-[Capacity | Channels]  [Gained | Lost | Either way]
-node, change, now
-Newest nodes ═════════════════════ │ Nodes that left ═══════════════════
-Closes by kind ═════════════════════════════════════════════════ Each day, UTC
-[a bar a day, its kinds stacked]
-Over time ═══════════════════════════════════════════════════ Every ten minutes
-[area: channels; dashed line: capacity, right axis]
-Largest nodes ════════════════════ │ Most connected nodes ══════════════
+Lightning  As of 12 Nov, 18:30 UTC                               [24 h | 1 w | 1 m]
+┌ Channels │ Nodes │ Capacity │ Median channel │ Median fee rate │ Median base fee ┐
+│ each a button: value, ↓ 54, a sparkline of the period; the pressed one is charted │
+│ Nodes reached by [clearnet │ both │ Tor │ no address]                    More ▸     │
+└──────────────────────────────────────────────────────────────────────────────────┘
+<figure>, over time ════════════════ │ Closes by kind ══════════ Each day, UTC
+[line: the pressed figure; its mean   │ [a bar a day, its kinds stacked]
+ in the readout for a median]         │ since …: 9 cooperative, 1 force · Penalties
+As it happens ══════ ● Live [Pause]   │ Movers ═══════ Net change, the last week
+[All | Opens | Closes | Fee changes]  │ [Capacity | Channels] [Gained | Lost | Either way]
+kind     node ↔ node    capacity      │ node, change, now
+channel                 when          │   (the feed fills the movers' height)
+Largest │ Most connected │ Newest nodes │ Nodes that left   (five rows each; a phone: one, picked)
 Node page: name (text, cut), key grouped with copy, "the key is the identity";
   figures; its past │ its fee rates (two bars a row: it charges, its peers charge); addresses and features as chips; channels, open | closed, 25 a page
 Channel page: id, its state as an icon and a word, the two nodes, capacity, age, the id in three forms;
@@ -577,16 +588,33 @@ Channel page: id, its state as an icon and a word, the two nodes, capacity, age,
 
 Decided while building it:
 
-- **The order answers the visit, for an operator:** the totals with their change over the period, what is happening now, who moved, how channels closed, the network over time, then five-row previews of the largest and best-connected nodes (their "Top 100" in the panel's heading). Every Lightning page has the short Overview and Rankings row; a node or channel leads back to the list the reader came from.
-- **The feed is calm.** Batches come at most every 30 s (about 23 fee changes a minute on mainnet, under one open): each lands at once with one flash, never row by row, and a burst says how many it left out. Opens and closes stay a press away in its kind picker when fee changes flood it. It pauses for its button, a pointer or focus in it, and starts paused under reduced motion. A close's kind is its tag: a penalty in the negative tone, a force close in `--ln-caution`. The same tones colour the bars of closes by kind; cooperative and other closes are neutrals.
+- **The order answers the visit, for an operator, and uses the width:** the totals with their change over the period, then the network over time beside how channels closed, what is happening now beside who moved, then four five-row lists (largest, most connected, newest, left; the first two with their "Top 100"). Panels that belong together sit side by side on a wide screen and stack below 65em; on a phone the four lists share one panel behind a picker, and the title and period share the first line, so all six figures with their change and trend are on a 390 px first screen. Every Lightning page has the short Overview and Rankings row; a node or channel leads back to the list the reader came from.
+- **Each figure is the chart's choice.** Pressing one draws it below (`?figure=`, kept across periods), so the chart can show the fee rate or the channel size, not only channels; a median's mean is in the readout. A figure's change reads `↓ 54` (the word is for screen readers); where the record is shorter than the period it runs from the record's first point, and one line says so once. Its sparkline spans the period, hatched before the record. "Nodes reached by" is one share bar in the series colours.
+- **The feed is calm,** and has no running counts. Batches come at most every 30 s (about 23 fee changes a minute on mainnet, under one open): each lands at once with one flash, never row by row, and a burst says how many it left out. Opens and closes stay a press away in its kind picker when fee changes flood it. It pauses for its button, a pointer or focus in it, and starts paused under reduced motion. A close's kind is its tag: a penalty in the negative tone, a force close in `--ln-caution`. The same tones colour the bars of closes by kind; cooperative and other closes are neutrals.
 - **What is ours is said, not hidden.** Under the figures, one line says only channels checked against the chain are counted; how, and what the fee figures leave out, is behind "How these figures are made". History starts when this server's peer first synced: the chart hatches the time before it and says since when; closes by kind start at the first recorded day (a week at least), so a young record fills the width instead of hatching it. The closed lists say they hold closes seen since then.
 - **A close says how sure it is,** beside its kind: "Force close · Certain", "Cooperative close · Likely" (a splice that only takes funds out looks the same), "Penalty · Certain", "Other · Certain it is not a plain close". Lists give the kind in one word; the channel page gives the reason.
-- **Charts are drawn in the series colours,** as the mining charts are: the main series an area, the second a dashed line on its own scale. Capacity in the figures reads in magnitude (`3 199 BTC`).
+- **Charts are drawn in the series colours,** as the mining charts are: the main series an area or a line, a second a dashed line on its own scale. Capacity in the figures reads in magnitude (`3 199 BTC`).
 - **Names are claims.** A node's name is text, cut short in lists and titles with the rest one press away, and isolated so its direction cannot run into the text beside it; its public key is always next to it. A node's announced colour appears once, in its Identity section, as a small swatch beside its `#rrggbb` value, a claim like its name; nowhere else does it colour anything.
 - **The node page is for its operator.** Its name and short key, its capacity and open channels each with its rank, and when a policy on its channels last changed; then one view at a time, chosen by tabs in the address: Channels (a table on a wide screen, sortable by every figure; on a phone three-line cards, with a sort picker), Closed, Fees ("In figures", then the histogram, whose bars open the channels they count) and History. Under the views, the node at a glance (each figure's change over 7 days once the record is that old), then its Identity. While the reader sorts, filters or pages, the list holds its rows until the new ones arrive. A row's state says what gossip says: "Enabled" (both ends), "Disabled by this node", "Disabled by the peer", or, where a policy is missing, whose ("Peer policy missing"), never "Disabled"; the state chips count the server's four states, an end "off" when its policy is disabled or missing.
 - **Tables fit a 320 px phone,** and every column keeps a gutter at every width. A chart's figures do too, with no sideways scroll: a time takes two lines (the day, then the time of day, with "UTC" in the header), and a node's fee figures are one table each way, headed with the chart's own words, side by side only where the panel holds both whole and one over the other otherwise. Long headers take two lines and fee-rate ranges break before their upper end wherever room runs short, at any width. A channel row puts its id, kind, time and both ends in one cell; a node list drops, on a phone, the figure it is not ranked by.
 - **The channel page is for the operators at its ends.** Each direction is drawn as a lane, coloured `--series-1` and `--series-2` across the lanes, the calculator and nothing else, saying in words which end charges what. What gossip says is said as advertised: "Enabled" is not "routable", and a missing policy reads "No policy", never "Disabled", which is only an advertised disabled flag. A closed channel has no policy to show, so it shows how it ended and its life, not empty drawings; one with no policy either way shows its lanes and no calculator or table. "Continued as" a new channel is inferred from the closing transaction, and said so. A figure is one piece at every text size: never broken inside its digits (its groups are joined by no-break spaces) nor parted from its unit, the line breaking between figures ("1 ppm" + "1 sat"); at the largest sizes (below 15em: 320 or 390 px at 200% text) the page's gutters and panel padding halve, the display figures stop growing past the text round them, and a figure longer than 12 characters (an msat term, the capacity) reads in magnitude (`0.200 BTC`); so does one in a hop fee's well narrower than 22em of its own text, at any size; so each fits whole in any reader's fonts. A name breaks anywhere, or is cut with its whole in the title. On a phone each policy term is a row over its two values, under the two ends' names; below 22.5em (a 320 px phone, or larger text) the values go one a line, each named for its node.
 - **Switched off is a sentence,** not an empty chart: a network without Lightning says so, and a peer still syncing shows how far it has come and fills the page when done.
+
+### Broadcast (not in the prototype)
+
+```text
+Broadcast a transaction
+[Paste a signed transaction in hex                          ]
+37d0355b…f83b66c6 [copy]
+┌ summary: Fee · Amount · Size ────────────────────────────────────┐
+└──────────────────────────────────────────────────────────────────┘
+[notice, caution: Check before you send — what is wrong, one line each]
+[Broadcast]  or  [Broadcast anyway]  or  ✓ Sent: follow it on its page
+┌ Inputs and outputs (the transaction page's flow) ────────────────┐
+└──────────────────────────────────────────────────────────────────┘
+```
+
+It is read as soon as it is pasted, so the answer comes before the button: what it pays and where its coins go. The button is the accent only when nothing needs a second thought; with a warning it is outlined and reads "Broadcast anyway". A transaction the node already has gets a positive notice and a link instead of a button. On a phone the fee and the size share a row and the amount has its own, as on the transaction page.
 
 ### Ark (not in the prototype)
 

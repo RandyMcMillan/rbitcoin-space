@@ -30,9 +30,10 @@ rbitcoin.space is a sidecar: one Rust server beside a stock rbitcoin node, a sta
 | `ln` | `crates/ln` | The gossip-only LDK peer and Lightning graph tracking |
 | `arkade` | `crates/arkade` | A typed client for an Arkade server's public indexer, over HTTPS: the bounded lookup behind the Arkade VTXO page |
 | `bark` | `crates/bark` | Bark VTXOs: the Bark server's `GetVtxo` call over HTTP/2 and TLS, our own decoder of its wire format, and the exit chain rebuilt and checked ([`ARK.md`](ARK.md)) |
+| `card` | `crates/card` | Link preview cards: a transaction's or block's figures drawn as a PNG from a typed value, with no I/O, clock or node, in the site's font ([`FRONTEND.md`](FRONTEND.md#link-previews)) |
 | `logging` | `crates/logging` | Typed log events, their catalogue and the non-blocking writer ([`LOGGING.md`](LOGGING.md)). Only the server emits; libraries report through values |
 
-Dependencies point one way: `server` → `engine` and `ln` → `node`, `server` → `arkade` and `bark`, and only `server` uses `logging`. A crate may be split when it earns it, not before.
+Dependencies point one way: `server` → `engine` and `ln` → `node`, `server` → `arkade`, `bark` and `card`, and only `server` uses `logging`. A crate may be split when it earns it, not before.
 
 Runtime is tokio with axum. SQLite is accessed through `rusqlite` with the bundled library.
 
@@ -56,11 +57,12 @@ A network is enabled by setting its variables (`.env.example`). Mainnet is serve
 |---|---|---|
 | `/api/*` | Esplora REST and the approved BlindBit v1 surface, as rbitcoin serves them | Passed through an allow-list of routes with typed parameters. Public and stable |
 | `/api/v1/*` | mempool.space-shaped subset | Only the endpoints listed as served in [`COMPAT.md`](COMPAT.md) |
-| `/app/*` | Private API for our frontend | May change in any release; the frontend and server ship together |
+| `/app/*` | Private API for our frontend | May change in any release; the frontend and server ship together. Also the link preview cards' pictures, `/app/card/…` ([`FRONTEND.md`](FRONTEND.md#link-previews)) |
 | `/app/ws` | WebSocket for live updates | See below |
 | `/api/v1/ws` | mempool.space-shaped WebSocket | For wallets and bots; the same hub ([`WS.md`](WS.md#the-mempoolspace-shaped-socket-apiv1ws)) |
+| `/mcp` | Model Context Protocol, for chat bots and coding agents | Off by default. Read-only tools that ask the routes above ([`MCP.md`](MCP.md)) |
 | `/healthz` | Liveness | No upstream calls |
-| everything else | The frontend | Static files from a configured directory, with the app shell as fallback; the shell's head names the page for link previews ([`FRONTEND.md`](FRONTEND.md#link-previews)) |
+| everything else | The frontend | Static files from a configured directory, with the app shell as fallback; the shell's head names the page for link previews, with the site's picture when `SITE_URL` is set ([`FRONTEND.md`](FRONTEND.md#link-previews)) |
 
 Confirmed data that can no longer change (a block or transaction buried deep enough) is served with long-lived cache headers so a reverse proxy or CDN can absorb it. Without one the server holds a buried block's answers in memory itself, and answers from our store are computed once per change to the tables they read ([`API.md`](API.md#answers-kept-in-memory)).
 

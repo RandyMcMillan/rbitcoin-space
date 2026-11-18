@@ -4,12 +4,13 @@ import { parseConfig } from "./config";
 describe("parseConfig", () => {
   it("keeps known networks and the version", () => {
     expect(
-      parseConfig({ networks: ["mainnet", "signet", "liquid", 3], version: "0.2.0" }),
+      parseConfig({ networks: ["mainnet", "signet", "liquid", 3], version: "0.3.0" }),
     ).toStrictEqual({
       networks: ["mainnet", "signet"],
-      version: "0.2.0",
+      version: "0.3.0",
       ark: {},
       lightning: [],
+      broadcast: false,
     });
   });
 
@@ -22,7 +23,15 @@ describe("parseConfig", () => {
       version: "",
       ark: {},
       lightning: [],
+      broadcast: false,
     });
+  });
+
+  it("reads whether the server broadcasts, only from a true", () => {
+    expect(parseConfig({ networks: [], broadcast: true })?.broadcast).toBe(true);
+    for (const broadcast of [false, "true", 1, null]) {
+      expect(parseConfig({ networks: [], broadcast })?.broadcast).toBe(false);
+    }
   });
 
   it("keeps each network's Ark implementations", () => {

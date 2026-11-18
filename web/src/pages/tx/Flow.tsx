@@ -7,7 +7,9 @@ import { Link } from "../../components/Link";
 import type { Outspend, Transaction, Vout } from "../../lib/esplora";
 import { feeColor, groupDigits } from "../../lib/format";
 import { paths } from "../../lib/network";
-import { classify, isText, opReturnData, printable } from "./script";
+import type { TagPart } from "../block/chain";
+import { type ChainText, coinbaseText, inputText, outputText } from "./chaintext";
+import { classify } from "./script";
 import {
   cssMs,
   isCoinbase,
@@ -25,18 +27,64 @@ export interface Selection {
   index: number;
 }
 
-/** OP_RETURN text shown on a flow card is cut here; the inspector has the rest. */
-const CARD_TEXT_CHARS = 40;
+/** What a card names when there is no address: the script type, and an OP_RETURN's size when its data is not text. */
+function scriptLabel(out: Vout): string {
+  const about = outputText(out)?.about;
+  return about ? `OP_RETURN, ${about}` : classify(out.scriptpubkey).label;
+}
 
-/** What a card names when there is no address: the script type, with an OP_RETURN's text if it has some. */
-export function scriptLabel(out: Vout): string {
-  const c = classify(out.scriptpubkey);
-  if (c.kind !== "op_return") return c.label;
-  const data = opReturnData(out.scriptpubkey);
-  if (!isText(data))
-    return data.length > 0 ? `OP_RETURN, ${groupDigits(data.length)} bytes` : "OP_RETURN";
-  const p = printable(data, CARD_TEXT_CHARS);
-  return `OP_RETURN “${p.text}${p.chars < printable(data).chars ? "…" : ""}”`;
+/** Chain text as text nodes: hidden runs as muted dots (six at most), counted in their title. */
+export function ChainWords(props: { parts: TagPart[] }) {
+  return (
+    <For each={props.parts}>
+      {(p) =>
+        "text" in p ? (
+          p.text
+        ) : (
+          <span
+            class="tx-hidden"
+            title={`${p.hidden} ${p.hidden === 1 ? "character" : "characters"} that are not text`}
+          >
+            {"·".repeat(Math.min(p.hidden, 6))}
+          </span>
+        )
+      }
+    </For>
+  );
+}
+
+/**
+ * A card's text line under its ledger row: the text in quotes, after its label when the card's
+ * name does not give it; or what a payload that is not text is ("Inscription, image/png, 793 B").
+ */
+function Memo(props: { t: ChainText | null; label: boolean }) {
+  return (
+    <Show when={props.t}>
+      {(t) => (
+        <Show
+          when={t().parts}
+          fallback={
+            <Show when={t().about}>
+              {(a) => (
+                <span class="tx-flow__memo tx-flow__memo--about">
+                  {t().label}, {a()}
+                </span>
+              )}
+            </Show>
+          }
+        >
+          {(parts) => (
+            <span class="tx-flow__memo">
+              <Show when={props.label}>
+                <span class="tx-flow__memo-label">{t().label}</span>{" "}
+              </Show>
+              “<ChainWords parts={parts()} />”
+            </span>
+          )}
+        </Show>
+      )}
+    </Show>
+  );
 }
 
 interface Ribbon {
@@ -208,9 +256,19 @@ export function Flow(props: {
       onClick={() => props.onSelect({ side, index })}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M4 6.5l4 4 4-4" />
+        <path d="M6 4l4 4-4 4" />
       </svg>
     </button>
+  );
+
+  /** The address, cut in the middle only as far as the card needs; or what the script is. */
+  const who = (out: Vout | null | undefined): JSX.Element => (
+    <Show
+      when={out?.scriptpubkey_address}
+      fallback={<span class="tx-flow__label">{out ? scriptLabel(out) : "Unknown"}</span>}
+    >
+      {(a) => <Hash value={a()} href={paths.address(a())} fit copy={false} />}
+    </Show>
   );
 
   const more = (side: Side, hidden: number, value: number, press: () => void): JSX.Element => (
@@ -223,12 +281,17 @@ export function Flow(props: {
       <button type="button" class="tx-flow__more" onClick={press}>
         Show {groupDigits(Math.min(hidden, MORE_STEP))} more
       </button>
+      <span class="tx-flow__amt">
+        <Amount sats={value} unit={false} fit />
+      </span>
       <span class="tx-flow__meta">
-        {groupDigits(hidden)} more {side === "in" ? "inputs" : "outputs"}, <Amount sats={value} />
+        {groupDigits(hidden)} more {side === "in" ? "inputs" : "outputs"}
       </span>
     </li>
   );
 
+  // A card is a ledger row: where the money came from or went and how much, then what kind of
+  // script and whether it is spent.
   return (
     <div class="tx-flow" ref={flowEl}>
       <ul class="tx-flow__col tx-flow__col--in" aria-label="Inputs" ref={inCol}>
@@ -237,17 +300,17 @@ export function Flow(props: {
           fallback={
             <li
               class={["tx-flow__item", { "is-selected": isSel("in", 0) }]}
-
               data-value={totalOut(props.tx)}
               data-kind="in"
               data-key="0"
             >
-              <div class="tx-flow__top">
-                <Amount sats={totalOut(props.tx)} unit={false} fit />
-                {openButton("in", 0)}
-              </div>
               <span class="tx-flow__who">Coinbase</span>
+              <span class="tx-flow__amt">
+                <Amount sats={totalOut(props.tx)} unit={false} fit />
+              </span>
               <span class="tx-flow__meta">New coins and fees</span>
+              <Memo t={coinbaseText(props.tx)} label={false} />
+              {openButton("in", 0)}
             </li>
           }
         >
@@ -255,53 +318,22 @@ export function Flow(props: {
             {(input, i) => (
               <li
                 class={["tx-flow__item", { "is-selected": isSel("in", i()) }]}
-
                 data-value={input.prevout?.value ?? 0}
                 data-key={i()}
               >
-                <div class="tx-flow__top">
+                <span class="tx-flow__who">{who(input.prevout)}</span>
+                <span class="tx-flow__amt">
                   <Show when={input.prevout} fallback={<span class="amount">–</span>}>
                     {(p) => <Amount sats={p().value} unit={false} fit />}
                   </Show>
-                  {openButton("in", i())}
-                </div>
-                <span class="tx-flow__who">
-                  <Show
-                    when={input.prevout?.scriptpubkey_address}
-                    fallback={input.prevout ? scriptLabel(input.prevout) : "Unknown"}
-                  >
-                    {(a) => (
-                      <span class="tx-flow__addrs">
-                        <span class="tx-flow__addr tx-flow__addr--short">
-                          <span class="tx-flow__addrs">
-                            <span class="tx-flow__addr tx-flow__addr--short">
-                              <Hash
-                                value={a()}
-                                href={paths.address(a())}
-                                head={7}
-                                tail={5}
-                                copy={false}
-                              />
-                            </span>
-                            <span class="tx-flow__addr tx-flow__addr--whole">
-                              <Hash value={a()} href={paths.address(a())} whole copy={false} />
-                            </span>
-                          </span>
-                        </span>
-                        <span class="tx-flow__addr tx-flow__addr--whole">
-                          <Hash value={a()} href={paths.address(a())} whole copy={false} />
-                        </span>
-                      </span>
-                    )}
-                  </Show>
                 </span>
                 <span class="tx-flow__meta">
-                  <span class="tx-flow__type">
-                    {input.prevout?.scriptpubkey_address
-                      ? classify(input.prevout.scriptpubkey).label
-                      : ""}
-                  </span>
+                  {input.prevout?.scriptpubkey_address
+                    ? classify(input.prevout.scriptpubkey).label
+                    : ""}
                 </span>
+                <Memo t={inputText(input)} label />
+                {openButton("in", i())}
               </li>
             )}
           </For>
@@ -341,46 +373,24 @@ export function Flow(props: {
           {(out, i) => (
             <li
               class={["tx-flow__item", { "is-selected": isSel("out", i()) }]}
-
               data-value={out.value}
               data-key={i()}
             >
-              <div class="tx-flow__top">
+              <span class="tx-flow__who">{who(out)}</span>
+              <span class="tx-flow__amt">
                 <Amount sats={out.value} unit={false} fit />
-                {openButton("out", i())}
-              </div>
-              <span class="tx-flow__who">
-                <Show
-                  when={out.scriptpubkey_address}
-                  fallback={<span class="tx-flow__label">{scriptLabel(out)}</span>}
-                >
-                  {(a) => (
-                    <span class="tx-flow__addrs">
-                      <span class="tx-flow__addr tx-flow__addr--short">
-                        <Hash
-                          value={a()}
-                          href={paths.address(a())}
-                          head={7}
-                          tail={5}
-                          copy={false}
-                        />
-                      </span>
-                      <span class="tx-flow__addr tx-flow__addr--whole">
-                        <Hash value={a()} href={paths.address(a())} whole copy={false} />
-                      </span>
-                    </span>
-                  )}
-                </Show>
               </span>
               <span class="tx-flow__meta">
                 <Show when={out.scriptpubkey_address}>
-                  <span class="tx-flow__type">{classify(out.scriptpubkey).label}</span>
+                  <span>{classify(out.scriptpubkey).label}</span>
                 </Show>
                 <Spent
                   unspendable={whyUnspendable(props.tx, out) !== null}
                   spend={props.outspends()?.[i()]}
                 />
               </span>
+              <Memo t={outputText(out)?.parts ? outputText(out) : null} label={false} />
+              {openButton("out", i())}
             </li>
           )}
         </For>
@@ -397,10 +407,10 @@ export function Flow(props: {
             data-kind="fee"
             data-key="fee"
           >
-            <div class="tx-flow__top">
-              <Amount sats={fee()} unit={false} fit />
-            </div>
             <span class="tx-flow__who">Fee</span>
+            <span class="tx-flow__amt">
+              <Amount sats={fee()} unit={false} fit />
+            </span>
             <span class="tx-flow__meta">
               <FeeRate rate={rate()} />
             </span>

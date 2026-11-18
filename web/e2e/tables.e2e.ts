@@ -90,7 +90,7 @@ test.describe("without the web font", () => {
       ["/regtest/blocks", (p) => p.getByRole("table").getByRole("link")],
       [`/regtest/block/${chain.blocks[106]}`, (p) => p.getByRole("table").getByRole("link")],
       ["/regtest/block/next", (p) => p.locator("main table a")],
-      [`/regtest/tx/${chain.txs.script_types}`, (p) => p.locator(".tx-summary .amount")],
+      [`/regtest/tx/${chain.txs.script_types}`, (p) => p.locator(".tx-answer .amount")],
       [`/regtest/address/${chain.addresses.p2tr}`, (p) => p.getByRole("table").getByRole("link")],
       // Regtest's chain is months old: all of history has its pools table.
       ["/regtest/mining?period=all", (p) => p.locator("main table a")],
@@ -311,10 +311,13 @@ for (const width of [320, 720]) {
     }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(path);
-      const figures = page.locator(".chart__figures > summary");
+      // The mempool's one plot keeps its figures under its panel; the other charts, in their caption.
+      const figures = page.locator(".chart__figures > summary, .mempool-figures-table > summary");
       await expect(figures.first()).toBeVisible({ timeout: 30_000 });
       for (const f of await figures.all()) if (await f.isVisible()) await f.click();
-      await expect(page.locator(".chart__figures table").first()).toBeVisible();
+      await expect(
+        page.locator(".chart__figures table, .mempool-figures-table table").first(),
+      ).toBeVisible();
       await tablesFit(page, `${path}'s figures at ${width} px`);
     });
   }
@@ -427,7 +430,7 @@ for (const width of FIGURES_WIDTHS) {
 
   // Every view of the block figures, each on a fresh page in the site's own faces; fee rates as
   // wide as mainnet's, two ranges and a median.
-  for (const view of ["Fees", "Rewards", "Fee rates", "Size"]) {
+  for (const view of ["Fees", "Fee rates", "Size"]) {
     test(`a chart's figures fit whole at ${width} px: the mining page's, ${view}`, async ({
       page,
     }) => {
@@ -447,9 +450,7 @@ for (const width of FIGURES_WIDTHS) {
       await expect(blocks.getByRole("slider")).toBeVisible({ timeout: 30_000 });
       // The page's other figures once, beside the first view's (regtest may have none of them).
       const names =
-        view === "Fees"
-          ? ["Hashrate and difficulty", "Block health", "Blocks over time"]
-          : ["Blocks over time"];
+        view === "Fees" ? ["Hashrate and difficulty", "Blocks over time"] : ["Blocks over time"];
       await open(names);
       await bothFaces(names, `/mining's ${view} at ${width} px`);
     });

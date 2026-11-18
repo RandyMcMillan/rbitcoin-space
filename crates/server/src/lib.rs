@@ -11,6 +11,7 @@ pub mod ark_arkade;
 pub mod ark_bark;
 mod audits;
 pub mod blocks;
+mod cards;
 pub mod config;
 pub mod decode;
 pub mod difficulty;
@@ -21,6 +22,7 @@ mod kept;
 pub mod ledger;
 pub mod lightning;
 pub mod limits;
+pub mod mcp;
 pub mod mining;
 mod pages;
 mod refusals;
@@ -32,6 +34,7 @@ mod serve;
 pub mod statistics;
 pub mod summary;
 mod transactions;
+mod tx_check;
 mod v1_blocks;
 pub mod verdicts;
 pub mod ws;
@@ -49,7 +52,7 @@ use axum::http::{HeaderMap, HeaderValue, Method};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
-use axum::{Json, Router, middleware};
+use axum::{Extension, Json, Router, middleware};
 use node::esplora::Esplora;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -279,8 +282,14 @@ pub fn network_routes() -> Router<Arc<NetworkContext>> {
         .route("/app/block/{hash}/summary", get(summary::facts))
         .route("/app/block/{hash}/txs", get(summary::txs))
         .route("/app/blocks/summary", get(summary::batch))
+        .route("/app/card/tx/{file}", get(cards::tx))
+        .route("/app/card/block/{file}", get(cards::block))
         .route("/app/tx/{txid}/relatives", get(relatives::route))
         .route("/app/tx/{txid}/replacements", get(replacements::route))
+        .route(
+            "/app/tx/check",
+            post(tx_check::route).layer(DefaultBodyLimit::max(esplora::MAX_BROADCAST_BODY)),
+        )
         .route("/app/fees/score", get(ws::fees::score::route))
         .route("/app/address/{address}/size", get(verdicts::size_route))
         .route("/app/address/{address}/ledger", get(ledger::route))
@@ -322,6 +331,8 @@ impl App {
             .route("/healthz", get(healthz))
             .merge(app_config::routes(config));
         let sockets = ws::Sockets::new(&config.ws, config.limits.request_timeout);
+        // Link preview cards' slots and drawn pictures, for the whole server (`cards`).
+        let cards = Arc::new(cards::Cards::new(config.web_dir.as_deref()));
         // One large-address join at the node at a time, for the whole server (`ledger`).
         let lane = Arc::new(tokio::sync::Semaphore::new(1));
         let mut enabled_networks = Vec::new();
@@ -379,6 +390,7 @@ impl App {
                                 .layer(DefaultBodyLimit::max(esplora::MAX_BROADCAST_BODY)),
                         )
                         .with_state(ctx)
+                        .layer(Extension(Arc::clone(&cards)))
                 }
                 None if prefix.is_empty() => Router::new(),
                 None => {
@@ -405,6 +417,7 @@ impl App {
         }
         let pages = Arc::new(pages::Pages::new(
             config.web_dir.as_deref(),
+            config.site_url.as_deref(),
             enabled_networks.clone(),
         ));
         let contexts = enabled_networks.clone();
@@ -430,6 +443,18 @@ impl App {
         // `/<anything>/api/...` is an API call for a network we do not know, never a page.
         for path in API_PATHS {
             app = app.route(&format!("/{{network}}{path}"), any(not_found));
+        }
+
+        // Every route above, for the tools to ask: built before `/mcp` itself is added.
+        if config.mcp {
+            let enabled = contexts.iter().map(|c| c.config.network).collect();
+            let mcp = Arc::new(mcp::Mcp::new(app.clone(), enabled));
+            app = app.route(
+                "/mcp",
+                post(mcp::route)
+                    .layer(DefaultBodyLimit::max(mcp::MAX_BODY))
+                    .with_state(mcp),
+            );
         }
 
         let cache =

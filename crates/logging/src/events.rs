@@ -46,9 +46,12 @@ pub struct ServerStarting<'a> {
     pub log_client_addr: bool,
     pub log_max_bytes_per_sec: u64,
     pub broadcast_enabled: bool,
+    pub mcp_enabled: bool,
     pub cloudflare_web_analytics: bool,
     /// `ONION_LOCATION`, or null when unset. The onion address is public.
     pub onion_location: Option<&'a str>,
+    /// `SITE_URL`, or null when unset. The site's public address.
+    pub site_url: Option<&'a str>,
     pub max_body_bytes: usize,
     pub request_timeout_secs: u64,
     pub max_connections: usize,
@@ -1790,7 +1793,7 @@ mod tests {
         let n = "signet";
         vec![
             both(&ServerStarting {
-                version: "0.2.0",
+                version: "0.3.0",
                 revision: "2912d6f0c3a1e4b5d6c7e8f9a0b1c2d3e4f5a6b7",
                 listen_addr: "127.0.0.1:0".into(),
                 web_dir: "web/dist".into(),
@@ -1801,8 +1804,10 @@ mod tests {
                 log_client_addr: false,
                 log_max_bytes_per_sec: 262_144,
                 broadcast_enabled: true,
+                mcp_enabled: false,
                 cloudflare_web_analytics: false,
                 onion_location: None,
+                site_url: None,
                 max_body_bytes: 1,
                 request_timeout_secs: 1,
                 max_connections: 1,

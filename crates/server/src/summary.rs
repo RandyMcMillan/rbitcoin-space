@@ -16,7 +16,8 @@
 //!   past that a request is answered `503` at once;
 //! - each client may start [`CLIENT_BURST`] computations, then one per [`CLIENT_EVERY`].
 //!
-//! A summary is fixed by the block's hash, so answers are cached for good by clients and proxies.
+//! A summary's transactions are fixed by the block's hash and cached for good; its facts name the
+//! miner and audit from our store, which a new pool list can change, so they are cached for a day.
 
 pub use engine::blocks::stats;
 
@@ -590,12 +591,18 @@ impl Answer {
     }
 }
 
-fn ok(route: &'static str, content_type: &'static str, body: Bytes, source: Source) -> Response {
-    let mut res = (
-        [(CONTENT_TYPE, content_type), (CACHE_CONTROL, IMMUTABLE)],
-        body,
-    )
-        .into_response();
+/// For a block's facts: they carry its miner and audit, which a new pool list or a later audit
+/// can change, so not `immutable`.
+const FACTS: &str = "public, max-age=86400";
+
+fn ok(
+    route: &'static str,
+    content_type: &'static str,
+    cache: &'static str,
+    body: Bytes,
+    source: Source,
+) -> Response {
+    let mut res = ([(CONTENT_TYPE, content_type), (CACHE_CONTROL, cache)], body).into_response();
     res.extensions_mut().insert(ApiOutcome {
         route,
         source,
@@ -648,7 +655,7 @@ pub async fn facts(
         .map_err(|_| Answer::Bad(ApiError::INTERNAL))?;
         Ok(unkept_unless(
             read,
-            ok(ROUTE, "application/json", body.into(), source),
+            ok(ROUTE, "application/json", FACTS, body.into(), source),
         ))
     };
     answer
@@ -670,7 +677,13 @@ pub async fn txs(
         let format = format!("v={}", stats::TXS_FORMAT);
         let hash = parse_hash(&hash, uri.query().filter(|q| *q != format))?;
         let (s, source) = get(&ctx, hash, client.addr).await?;
-        Ok(ok(ROUTE, "application/octet-stream", s.txs.clone(), source))
+        Ok(ok(
+            ROUTE,
+            "application/octet-stream",
+            IMMUTABLE,
+            s.txs.clone(),
+            source,
+        ))
     };
     answer
         .await
@@ -743,7 +756,7 @@ pub async fn batch(
         let body = serde_json::to_vec(&published).map_err(|_| Answer::Bad(ApiError::INTERNAL))?;
         Ok(unkept_unless(
             read,
-            ok(ROUTE, "application/json", body.into(), source),
+            ok(ROUTE, "application/json", FACTS, body.into(), source),
         ))
     };
     answer
@@ -765,7 +778,13 @@ pub async fn v1_txs(
         let (s, source) = get(&ctx, hash, client.addr).await?;
         let rows: Vec<TxRow> = s.rows().collect();
         let body = serde_json::to_vec(&rows).map_err(|_| Answer::Bad(ApiError::INTERNAL))?;
-        Ok(ok(ROUTE, "application/json", body.into(), source))
+        Ok(ok(
+            ROUTE,
+            "application/json",
+            IMMUTABLE,
+            body.into(),
+            source,
+        ))
     };
     answer
         .await
@@ -788,7 +807,13 @@ pub async fn v1_tx(
             .find(|r| r.txid == txid)
             .ok_or(Answer::Bad(NOT_IN_BLOCK))?;
         let body = serde_json::to_vec(&row).map_err(|_| Answer::Bad(ApiError::INTERNAL))?;
-        Ok(ok(ROUTE, "application/json", body.into(), source))
+        Ok(ok(
+            ROUTE,
+            "application/json",
+            IMMUTABLE,
+            body.into(),
+            source,
+        ))
     };
     answer
         .await

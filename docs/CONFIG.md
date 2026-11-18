@@ -65,7 +65,13 @@ VTXO pages for Ark implementations, per network ([`ARK.md`](ARK.md)). Off unless
 
 | Variable | Default | What it does |
 |---|---|---|
-| `BROADCAST_ENABLED` | `true` | `false` turns off `POST /api/tx` and `POST /api/blindbit/v1/forward-tx` on every network (it answers `403`). Broadcast is the only write the server makes to the node; its size cap and per-client rate limit are fixed ([`API.md`](API.md#broadcast)) |
+| `BROADCAST_ENABLED` | `true` | `false` turns off `POST /api/tx` and `POST /api/blindbit/v1/forward-tx` on every network (it answers `403`), and the footer's link to the broadcast page; the page still reads a pasted transaction and says the server does not broadcast. Broadcast is the only write the server makes to the node; its size cap and per-client rate limit are fixed ([`API.md`](API.md#broadcast)) |
+
+## MCP
+
+| Variable | Default | What it does |
+|---|---|---|
+| `MCP_ENABLED` | `false` | `true` serves `POST /mcp`, a read-only Model Context Protocol server for chat bots and coding agents ([`MCP.md`](MCP.md)). Its tools ask routes this server already serves, under those routes' limits; it needs no sign-in |
 
 ## Cloudflare Web Analytics
 
@@ -78,6 +84,12 @@ VTXO pages for Ark implementations, per network ([`ARK.md`](ARK.md)). Off unless
 | Variable | Default | What it does |
 |---|---|---|
 | `ONION_LOCATION` | unset | The site's onion service, `http://` and a v3 address (56 characters, `a`–`z` and `2`–`7`, then `.onion`), no path. When set, every HTML page carries `Onion-Location: <it><path and query>`, which Tor Browser offers to open; other answers do not. Any other form stops the server at startup. Tor Browser honours it only on an HTTPS page ([`DEPLOY.md`](DEPLOY.md#as-a-tor-onion-service)) |
+
+## Site address
+
+| Variable | Default | What it does |
+|---|---|---|
+| `SITE_URL` | unset | The site's public address, `http://` or `https://` and a host with an optional port, nothing after it but one `/` (dropped): `https://rbitcoin.space`. When set, every page's head carries a link preview picture (a transaction's and a block's own card, the site's picture for the rest) and the page's own address (`og:image`, `og:url` and the rest, [`FRONTEND.md`](FRONTEND.md#link-previews)), so a pasted link shows a large card; unset, the card is text only. Never taken from the request's `Host`, which a client chooses. Any other form stops the server at startup |
 
 ## Logging
 
@@ -140,7 +152,7 @@ The defaults above are derived from what the frontend really asks for, so an ord
 
 At most 7 static files were in flight at once on any page (18 before).
 
-Opening a block's audit list adds two files and one API request. Since the recording, the home page's recent replacements add one API request to its cold load (`/api/v1/replacements`), and one more whenever a replacement arrives, at most every 10 s. An open home page then polls about once every 3 seconds. Static files are `/assets`, the app shell and `boot.js`; a second load takes them from the browser cache.
+Opening a block's audit list adds two files and one API request. Since the recording, the home page's recent replacements add one API request to its cold load (`/api/v1/replacements`), and one more whenever a replacement arrives, at most every 10 s. Its mempool panel's map and chart, once in view, add ten files (the grid, the chart and what they share) and one API request (`/app/mempool/history/2h`, then once a minute), and the `projected-txs:0` topic. An open home page then polls about once every 3 seconds. Static files are `/assets`, the app shell and `boot.js`; a second load takes them from the browser cache.
 
 | Limit | Default | Derivation |
 |---|---|---|
@@ -159,8 +171,6 @@ The browser tests run at these defaults too, each test as a client of its own be
 ### Static files
 
 Pages and the files under `/assets` are answered from memory or disk with no node work behind them; a block page's head reads at most one row of the block table, two at once server-wide ([`FRONTEND.md`](FRONTEND.md#link-previews)). They have their own per-client limits, fixed: a burst of 400, refilled at 100 a second, and 96 in flight at once, counted separately from the API's. They still pass `MAX_CONCURRENT_REQUESTS`, `MAX_CONNECTIONS`, `CLIENT_MAX_CONNECTIONS` and the timeouts like every request, so a client flooding them is refused with `429` while others are served.
-
-There is no setting for the site's public address. Link previews ([`FRONTEND.md`](FRONTEND.md#link-previews)) leave out `og:url` and the canonical link rather than build them from the request's `Host`, which a client chooses. A preview image will need an absolute URL; that change adds the setting.
 
 ### Preflights
 

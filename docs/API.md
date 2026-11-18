@@ -251,6 +251,24 @@ Once a kept address's whole history is in the store, `/api/address/:a/txs`, `/tx
 - **Rejects** are `400` with a fixed reason: rbitcoin's own reason when it is on our list of known policy and consensus reasons (`min relay fee`, `dust`, `mempool double-spend`, `bad-txns-inputs-duplicate`, …), otherwise `transaction already in the mempool or chain`, `missing or spent inputs`, `script verification failed` or `transaction rejected`.
 - **Off switch:** `BROADCAST_ENABLED=false` turns it off for every network; it then answers `403 broadcast is disabled on this server`.
 
+### Checking a transaction
+
+`POST /app/tx/check` (each network's `/app`) is what the broadcast page shows before anyone sends, and what the decoder shows for pasted hex: the body is a raw transaction, as `POST /tx` takes it, and the answer says what it does. It writes nothing and is served whether or not broadcast is on. The code is `crates/server/src/tx_check.rs`.
+
+```json
+{ "tx": { "txid": "6033…6634", "version": 2, "locktime": 799999,
+          "vin": [{ "txid": "2959…db51", "vout": 23, "prevout": { "scriptpubkey": "0014…", "scriptpubkey_address": "bc1q…", "scriptpubkey_asm": "OP_0 …", "scriptpubkey_type": "v0_p2wpkh", "value": 107374 },
+                    "scriptsig": "", "scriptsig_asm": "", "witness": ["3044…", "0295…"], "is_coinbase": false, "sequence": 4294967293 }],
+          "vout": [ … ], "size": 244, "weight": 649, "fee": 107000, "status": { "confirmed": false } },
+  "known": null }
+```
+
+- **`tx` is in Esplora's shape** (`GET /tx/:txid`), so the transaction page's parts can show it; a test holds it equal to the node's answer for a public transaction. `sigops` and the inner script fields are left out. Output forms and addresses are ours, for this network.
+- **What each input spends** is looked up as `POST /api/v1/prevouts` does ([Transactions](#transactions)): the first 100 distinct outputs, under the cost limit of the address and batch routes. `prevout` is the output, `null` when the node has no such output (spent and gone, or on another network), and absent past the first 100 or for a coinbase.
+- **`fee`** only when every input's output was found and they hold at least what it pays out.
+- **`known`** is the node's `GET /tx/:txid/status` when it already has this txid, in the mempool or a block, otherwise `null`.
+- **Requests:** the body is read as broadcast reads it, with the same size cap; `400 body must be one raw transaction in hex` and `413 body too large` come before any node call. The transaction is in no URL, so in no log line. `Cache-Control: no-store`.
+
 ## mempool.space-shaped routes (`/api/v1`)
 
 A subset of mempool.space's own API, for wallets and tools written against it, under each network's `/api/v1` (`/api/v1`, `/signet/api/v1`, …). Which routes exist is the `served` rows of [`compat/api-v1.md`](compat/api-v1.md). Any other path under `/api/v1` is a `404`. Its WebSocket, `/api/v1/ws`, is in [`WS.md`](WS.md#the-mempoolspace-shaped-socket-apiv1ws).
@@ -304,7 +322,7 @@ How we differ from the reference backend, measured side by side: progress, heigh
 | Field | Here | The reference's |
 |---|---|---|
 | `hostname` | `null` | Its host's name. Private ([`SECURITY.md`](SECURITY.md) rule 17) |
-| `version` | The server's version (`0.2.0`), as `/healthz` and `/app/config` say it | Its own release |
+| `version` | The server's version (`0.3.0`), as `/healthz` and `/app/config` say it | Its own release |
 | `gitCommit` | The commit the binary was built from, the 40 digits `/healthz` reports as `revision` ([`DEPLOY.md`](DEPLOY.md#health)); `null` for a build without one | 9 digits of its own commit |
 | `lightning` | Whether this network serves the Lightning routes | The same |
 | `backend` | `"esplora"`: transactions and addresses come from the node's Esplora | Its address backend: `esplora`, `electrum` or `none` |
@@ -328,7 +346,7 @@ What to pay to be mined within a horizon, and the projected blocks behind it. Co
 | `fastestFee` | `high` | the next block |
 | `halfHourFee` | `medium` | within 3 blocks, about half an hour |
 | `hourFee` | `low` | within 6 blocks, about an hour |
-| `economyFee` | `no_rush` | within 144 blocks, about a day |
+| `economyFee` | `no_rush` | within 144 blocks, about a day. Ours is at least the cheapest rate that got into a block of the last day plus 0.002 sat/vB, unless `hourFee` is lower (then it equals `hourFee`) or no block of the last day was recorded ([`MEMPOOL.md`](MEMPOOL.md#the-day-long-level)) |
 | `minimumFee` | | the lowest rate the node accepts now (`mempoolminfee`, never under 0.1 sat/vB) |
 
 A faster level is never lower than a slower one, and none is below `minimumFee`.
@@ -526,21 +544,21 @@ A chart can then say "data from … onward" instead of drawing a false zero. Fee
 
 #### Who mined a block
 
-**The list.** `crates/engine/data/pools/pool-list.json` is [bitcoin-data/mining-pools](https://github.com/bitcoin-data/mining-pools)' generated list (149 pools, 174 tags, 201 addresses), copied unchanged from the `generated` branch at commit `0158b59` (2026-06-30). Its licence is MIT, read in its `LICENSE` file: copyright btc.com (2019–2021), whose list it forked, and 0xB10C and contributors since. MIT allows redistribution in this MIT project on the one condition that the notice travels with it, so `LICENSE` and a `README.md` naming the source and commit sit beside the file. mempool.space's own pool list was not used or opened. Pool ids are the list's; slugs are each name's ASCII letters and digits, lowercased. `local-pools.json` beside it holds our own additions in the same format, ids from 10000 so they never meet upstream's; it names P2Poolv2 by its `P2Poolv2` tag (it pays its miners directly, so it has no address) and the Testnet 5 miner jaonoctus by his `@jaonoctus` tag only (P2Poolv2 blocks also pay his address, so listing it would take them from P2Poolv2). A refresh from upstream that adds one of these pools must drop ours: the clash refuses the whole list and `shipped_list_parses_whole` fails.
+**The list.** `crates/engine/data/pools/pool-list.json` is [bitcoin-data/mining-pools](https://github.com/bitcoin-data/mining-pools)' generated list (149 pools, 174 tags, 201 addresses), copied unchanged from the `generated` branch at commit `0158b59` (2026-06-30). Its licence is MIT, read in its `LICENSE` file: copyright btc.com (2019–2021), whose list it forked, and 0xB10C and contributors since. MIT allows redistribution in this MIT project on the one condition that the notice travels with it, so `LICENSE` and a `README.md` naming the source and commit sit beside the file. mempool.space's own pool list was not used or opened. Pool ids are the list's; slugs are each name's ASCII letters and digits, lowercased. `local-pools.json` beside it holds our own additions in the same format, ids from 10000 so they never meet upstream's; it names P2Poolv2 by its `P2Poolv2` tag (it pays its miners directly, so it has no address), the Testnet 5 miner jaonoctus by the `@jaonoctus` tag only, and the Testnet 5 Stratum v2 pool plebhash by its `plebhash` tag only. A refresh from upstream that adds one of these pools must drop ours: the clash refuses the whole list and `shipped_list_parses_whole` fails.
 
 **The rules,** in order (`Pools::attribute`):
 
-1. **A payout to a pool's listed address wins.** Only the pool holds that address's key; anyone can write any tag. A block tagged for one pool that pays another's address is the other's. Among several payouts, the first in output order decides.
-2. **Otherwise the coinbase tag:** the longest listed tag found anywhere in the coinbase script, ignoring ASCII case. Longest first, so a tag that contains another (`/ViaBTC/TATMAS Pool/` holds `/ViaBTC/`, `/solo.ckpool.org/` holds `ckpool`) wins over it. At equal length, the one earlier in the script, then the lower id.
+1. **The coinbase tag wins:** the longest listed tag found anywhere in the coinbase script, ignoring ASCII case. Longest first, so a tag that contains another (`/ViaBTC/TATMAS Pool/` holds `/ViaBTC/`, `/solo.ckpool.org/` holds `ckpool`) wins over it. At equal length, the one earlier in the script, then the lower id.
+2. **Otherwise a payout to a pool's listed address.** Among several payouts, the first in output order decides.
 3. **Otherwise `Unknown`** (id 0), counted and ranked like any pool, never dropped.
 
-A tag is a claim without proof: a block that writes a pool's tag and pays an address not on the list is that pool's. Pools move payout addresses more often than lists follow (in the sample below, 3,615 of the 3,883 blocks attributed by tag belong to pools whose listed addresses they did not pay), so refusing would turn most of them into `Unknown`.
+A tag names whoever built the block. A payout only shows who got paid: P2Pool and TIDES pools (Ocean) pay their miners straight from the coinbase, so a solo miner with a listed address who joins one would otherwise take its blocks (Testnet 5 block 4329 is a P2Poolv2 block whose second payout is jaonoctus's). The address is the fallback for blocks with no listed tag. Pools also move payout addresses more often than lists follow: in the sample below, 3,615 of the 3,883 blocks named by tag alone belong to pools whose listed addresses they did not pay.
 
 **Hostile input.** The tag and payout scripts are written by whoever mined the block and are stored bounded (at most 100 bytes, eight scripts of 128): matching is a byte comparison of at most 174 tags of at most 30 bytes over 100 bytes and eight map lookups, allocates nothing per block and cannot panic. Invalid UTF-8 is just bytes. Names, tags and addresses in answers are the list's; the only chain bytes in an answer are a pool block's coinbase, as hex and as one Latin-1 character per byte, serialized as JSON strings. The private block facts (`/app/block/:hash/summary`, [`FRONTEND.md`](FRONTEND.md#block-summaries)) name each block's miner by the same rules, as the list's name and slug only.
 
 **Stored, not computed per request.** The block table keeps each row's pool (`pool` column, [`STORE.md`](STORE.md#blocks)), set when the row is written. Measured on a 975,000-row table: counting blocks per pool over all of history takes 0.2 s from the column, while attributing at query time means reading and matching every coinbase, 1.8 s, past the store's 2 s read limit under any load. Writing costs 2 µs a row more. The table records which list and rules (`pool_list.version`, a hash of the file and a rules number) its rows were attributed with; when a build ships another list, the first start redoes every row in batches of 10,000 (1.8 s for 975,000 rows, no node call) before the mining routes answer.
 
-**Quality,** over a bounded mainnet sample of 7,851 blocks (heights 967,676 to 975,526, 54 days): 99.69 % identified, 3,944 by address and 3,883 by tag; 24 `Unknown` (blocks with no readable tag, a `j://<uuid>` tag, or `Sv2/MARA`). No block in the sample had a tag and an address naming different listed pools. For the same week the reference ranked 895 blocks and so did we; 891 were attributed alike. The 4 others carry the tag `/trustpool/` but pay ViaBTC's listed address: the reference says TrustPool, we say ViaBTC by rule 1, and the list has no TrustPool. Two pools are named differently from the reference's list: `Ocean.xyz` (`oceanxyz`, theirs `ocean`) and `BTC.com` (`btccom`, theirs `cloverpool`).
+**Quality,** over a bounded mainnet sample of 7,851 blocks (heights 967,676 to 975,526, 54 days): 99.69 % identified, 3,944 paying a listed address and 3,883 more by tag alone; 24 `Unknown` (blocks with no readable tag, a `j://<uuid>` tag, or `Sv2/MARA`). No block in the sample had a tag and an address naming different listed pools. For the same week the reference ranked 895 blocks and so did we; 891 were attributed alike. The 4 others carry the tag `/trustpool/` but pay ViaBTC's listed address: the reference says TrustPool, we say ViaBTC by rule 2, since the list has no TrustPool tag. Two pools are named differently from the reference's list: `Ocean.xyz` (`oceanxyz`, theirs `ocean`) and `BTC.com` (`btccom`, theirs `cloverpool`).
 
 #### Hashrate
 

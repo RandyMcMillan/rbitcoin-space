@@ -1,7 +1,14 @@
 // The mempool's history (`/app/mempool/history/:interval`, docs/FRONTEND.md "Mempool history"):
 // its shape, a check, the intervals, and what the page says about it. Pure.
 import { formatMoment } from "../../components/chart/scale";
-import { FEE_BANDS, formatSize, groupDigits, UNSPLIT_BANDS, widenBands } from "../../lib/format";
+import {
+  FEE_BANDS,
+  FEE_KEY_BOUNDS,
+  formatSize,
+  groupDigits,
+  UNSPLIT_BANDS,
+  widenBands,
+} from "../../lib/format";
 
 export const INTERVALS = [
   { id: "2h", label: "2 h", words: "the last 2 hours" },
@@ -261,4 +268,167 @@ export function sizeSummary(h: History): string {
   const lo = ps.reduce((a, b) => (b.vsize < a.vsize ? b : a));
   const hi = ps.reduce((a, b) => (b.vsize > a.vsize ? b : a));
   return `The mempool went from ${formatSize(first.vsize)} at ${at(first.time)} to ${formatSize(last.vsize)} at ${at(last.time)}; smallest ${formatSize(lo.vsize)} at ${at(lo.time)}, largest ${formatSize(hi.vsize)} at ${at(hi.time)}.`;
+}
+
+/** A band's range as the key prints it, cheapest first: `under 0.12`, `0.2–0.3`, `10+`. */
+export function bandName(k: number): string {
+  const from = FEE_KEY_BOUNDS[k];
+  const to = FEE_KEY_BOUNDS[k + 1];
+  if (k === 0) return `under ${to ?? ""}`;
+  return to === undefined ? `${from ?? ""}+` : `${from ?? ""}–${to}`;
+}
+
+/** A block's worth of virtual size. */
+const BLOCK_VB = 1_000_000;
+
+/**
+ * The period's four figures: what waits now, how that changed and its peak, the flow, and the
+ * cheapest band the dearest block's worth now reaches into (`deep`, -1 when less than a block
+ * waits). The history keeps no block's lowest rate, so this is the honest stand-in for one.
+ */
+export function figures(h: History) {
+  const ps = h.points;
+  const first = ps[0];
+  const last = ps.at(-1);
+  if (!first || !last) return undefined;
+  const peak = ps.reduce((a, b) => (b.vsize > a.vsize ? b : a));
+  const bands = widenBands(last.bands).bands;
+  let deep = -1;
+  let acc = 0;
+  for (let k = bands.length - 1; k >= 0; k--) {
+    acc += bands[k] ?? 0;
+    if (acc >= BLOCK_VB) {
+      deep = k;
+      break;
+    }
+  }
+  return { last, peak, change: last.vsize - first.vsize, flow: netFlow(h), deep };
+}
+
+/** The flow reads in means over this many seconds when the answer is finer: about a block. */
+export const FLOW_STEP = 600;
+/** The longest run of missing steps drawn across rather than as a break. */
+export const BRIDGE_STEPS = 5;
+
+/**
+ * The flow at each point in vB a second: what arrived, what blocks took and what left otherwise.
+ * A minute holds one block or none, so a finer answer gives each point the mean of its ten
+ * minutes, weighted by the minutes seen, else a block's minute dwarfs what arrives; coarser
+ * answers are as recorded. A break in recording ends a mean, so none reaches across one, and the
+ * values stand at the points' own times, so the flow breaks where the size does. `drawn` is the
+ * same as steps: each value holds over its own step, the last of each run included, so the newest
+ * value has width and is never a bare edge.
+ */
+export function flowPoints(h: History) {
+  const step = Math.max(h.step, FLOW_STEP);
+  const gap = h.step * (BRIDGE_STEPS + 1);
+  const ps = h.points;
+  let run = 0;
+  const keys = ps.map((p, i) => {
+    if (i > 0 && p.time - (ps[i - 1]?.time ?? p.time) > gap) run += 1;
+    return `${run}:${Math.floor(p.time / step)}`;
+  });
+  const groups = new Map<string, { n: number; in: number; mined: number; other: number }>();
+  for (const [i, p] of ps.entries()) {
+    const key = keys[i] ?? "";
+    const g = groups.get(key) ?? { n: 0, in: 0, mined: 0, other: 0 };
+    g.n += p.samples;
+    g.in += p.in_vsize * p.samples;
+    g.mined += p.mined_vsize * p.samples;
+    g.other += Math.max(0, p.out_vsize - p.mined_vsize) * p.samples;
+    groups.set(key, g);
+  }
+  const mean = (pick: (g: { in: number; mined: number; other: number }) => number) =>
+    keys.map((k) => {
+      const g = groups.get(k);
+      return g && g.n > 0 ? pick(g) / g.n / 60 : 0;
+    });
+  const entered = mean((g) => g.in);
+  const mined = mean((g) => g.mined);
+  const other = mean((g) => g.other);
+  // `null` is a break: the paths never join across one, however near its neighbours stand.
+  const drawn = {
+    x: [] as number[],
+    entered: [] as (number | null)[],
+    mined: [] as (number | null)[],
+    other: [] as (number | null)[],
+  };
+  const add = (t: number, i: number | null) => {
+    drawn.x.push(t);
+    drawn.entered.push(i === null ? null : (entered[i] ?? 0));
+    drawn.mined.push(i === null ? null : (mined[i] ?? 0));
+    drawn.other.push(i === null ? null : (other[i] ?? 0));
+  };
+  const runOf = (i: number) => keys[i]?.split(":")[0];
+  for (const [i, p] of ps.entries()) {
+    add(p.time, i);
+    // The end of a run: its last value holds to the end of its step, inside the period, and
+    // the next run starts after a break.
+    if (runOf(i + 1) !== runOf(i)) {
+      const end = Math.min(p.time + h.step, h.to);
+      add(end, i);
+      if (i + 1 < ps.length) add(end, null);
+    }
+  }
+  return { step, entered, mined, other, drawn };
+}
+
+export type Series = ReturnType<typeof seriesOf>;
+export type Flow = ReturnType<typeof flowPoints>;
+
+/**
+ * The band the filter offers to start from: the first above the cheap bulk, where nine tenths of
+ * the latest point lie below. 0 when there is no such bulk, or nothing would be left above it.
+ */
+export function filterFrom(s: Series): number {
+  const at = s.x.length - 1;
+  if (at < 0) return 0;
+  const bands = s.bands.map((b) => b[at] ?? 0);
+  const unsplit = s.unsplit?.[at] ?? 0;
+  const total = unsplit + bands.reduce((a, b) => a + b, 0);
+  if (total <= 0) return 0;
+  // A point from before the split holds all under 0.2 in one: a filter starts at 0.2 or above.
+  const lowest = unsplit > 0 ? 3 : 1;
+  let below = unsplit;
+  for (let k = 0; k < bands.length; k++) {
+    if (k >= lowest && below >= total * 0.9) return below < total ? k : 0;
+    below += bands[k] ?? 0;
+  }
+  return 0;
+}
+
+/**
+ * The stacked layers from band `floor` up (0 shows them all), in the order they stack: the
+ * unsplit layer first where the answer has one, then the twelve. `band` is the key's index, -1
+ * for the unsplit layer, which is all under 0.2 and so belongs to the view only when all is shown.
+ */
+export function layersFrom(s: Series, floor: number) {
+  const all = [
+    ...(s.unsplit ? [{ band: -1, values: s.unsplit }] : []),
+    ...s.bands.map((values, k) => ({ band: k, values })),
+  ];
+  const keep = all.map((l) => (l.band === -1 ? floor === 0 : l.band >= floor));
+  const pick = <T>(xs: readonly T[]) => xs.filter((_, i) => keep[i] === true);
+  return {
+    layers: pick(all),
+    joins: s.joins.map((j) => ({
+      index: j.index,
+      before: j.before ? pick(j.before) : undefined,
+      after: j.after ? pick(j.after) : undefined,
+    })),
+  };
+}
+
+/**
+ * What the crosshair reads at point `i` in both strips: the point, what of it the shown bands
+ * hold, and the flow there (the flow's values stand at the same points as the size's).
+ */
+export function crosshair(h: History, s: Series, f: Flow, i: number, floor: number) {
+  const p = h.points[i];
+  if (!p) return undefined;
+  const shown =
+    (floor === 0 ? (s.unsplit?.[i] ?? 0) : 0) +
+    s.bands.reduce((sum, b, k) => (k >= floor ? sum + (b[i] ?? 0) : sum), 0);
+  const flow = { entered: f.entered[i] ?? 0, mined: f.mined[i] ?? 0, other: f.other[i] ?? 0 };
+  return { point: p, shown, flow };
 }

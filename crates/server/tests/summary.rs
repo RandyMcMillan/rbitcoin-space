@@ -22,6 +22,9 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+/// A block's facts name its miner, which a new pool list can change: a day, not `immutable`.
+const FACTS: &str = "public, max-age=86400";
+
 /// Transactions in each mock block, the coinbase included.
 const TXS: usize = 100;
 /// Bytes the server's cache counts for one mock block: header, records, txids and weights, and
@@ -335,13 +338,13 @@ async fn request_event(r: &Reply) -> Value {
 // Tests.
 
 #[tokio::test]
-async fn facts_records_and_batches_are_served_and_cached_for_good() {
+async fn facts_records_and_batches_are_served_and_cached() {
     let (addr, node) = start(Duration::ZERO, 100).await;
     let (a, b) = (hash(1), hash(2));
 
     let r = get(&addr, &summary(&a), "192.0.2.1").await;
     assert_eq!(r.status, 200, "{r:?}");
-    assert_eq!(r.header("cache-control"), Some(IMMUTABLE));
+    assert_eq!(r.header("cache-control"), Some(FACTS));
     assert_eq!(r.header("content-type"), Some("application/json"));
     let f = r.json();
     assert_eq!(f["id"], a.as_str());
@@ -362,11 +365,8 @@ async fn facts_records_and_batches_are_served_and_cached_for_good() {
         .map(|v| v.as_u64().unwrap())
         .sum();
     assert_eq!(bands, 9_900);
-    // Tagged ViaBTC, paid to Foundry USA's address: the payout decides, by the list's name.
-    assert_eq!(
-        f["miner"],
-        json!({"name": "Foundry USA", "slug": "foundryusa"})
-    );
+    // Tagged ViaBTC, paid to Foundry USA's address: the tag decides, by the list's name.
+    assert_eq!(f["miner"], json!({"name": "ViaBTC", "slug": "viabtc"}));
     let e = request_event(&r).await;
     assert_eq!(
         (e["endpoint"].as_str(), e["source"].as_str()),
@@ -405,7 +405,7 @@ async fn facts_records_and_batches_are_served_and_cached_for_good() {
     )
     .await;
     assert_eq!(r.status, 200, "{r:?}");
-    assert_eq!(r.header("cache-control"), Some(IMMUTABLE));
+    assert_eq!(r.header("cache-control"), Some(FACTS));
     let all = r.json();
     let ids: Vec<&str> = all
         .as_array()
@@ -420,10 +420,10 @@ async fn facts_records_and_batches_are_served_and_cached_for_good() {
         all[0]["miner"],
         json!({"name": "Unknown", "slug": "unknown"})
     );
-    assert_eq!(all[1]["miner"]["slug"], "foundryusa");
+    assert_eq!(all[1]["miner"]["slug"], "viabtc");
     let body = String::from_utf8_lossy(&r.body);
     assert!(
-        !body.contains("onerror") && !body.contains("ViaBTC"),
+        !body.contains("onerror") && !body.contains("/ViaBTC/"),
         "{body}"
     );
 
@@ -504,11 +504,11 @@ async fn a_block_in_the_table_is_answered_without_the_node() {
     .await;
     let r = get(&addr, &summary(&a), "192.0.2.1").await;
     assert_eq!(r.status, 200, "{r:?}");
-    assert_eq!(r.header("cache-control"), Some(IMMUTABLE));
+    assert_eq!(r.header("cache-control"), Some(FACTS));
     assert_eq!(r.body, computed.body, "the same answer, byte for byte");
     assert_eq!(
         r.json()["miner"]["slug"],
-        "foundryusa",
+        "viabtc",
         "from the stored coinbase"
     );
     assert_eq!(request_event(&r).await["source"], "stored");
