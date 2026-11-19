@@ -37,6 +37,7 @@ import { fetchSummaries } from "../../lib/summary";
 import { type ReplacementLink, type TxMessage, txTopic } from "../../lib/track-topics";
 import { TxLightning } from "../lightning/TxLightning";
 import { Code } from "./Code";
+import { CompareLine } from "./Compare";
 import { Flow, type Selection } from "./Flow";
 import { Inspector } from "./Inspector";
 import { Chain, Follow, Group, LiveState, POLL_MS, Strip } from "./Live";
@@ -344,12 +345,25 @@ function TransactionView(props: { txid: string }) {
   // server does not follow this network's mempool (the route would refuse).
   const replacementsKey = () => {
     const l = live();
-    if (l === "off" || l === "connecting") return false;
-    if (missing()) return "missing";
-    const s = shownNow().kind;
-    if (s === "gone") return "gone";
+    if (l === "off") return false;
     const t = ready();
-    return t && !t.status.confirmed ? "waiting" : false;
+    const s = shownNow();
+    // Replaced while open: asked again, so the page learns whether this was a version or a child
+    // that left with its parent before it offers a comparison. Again when the newest changes.
+    // Before anything else: a transaction that loaded confirmed can be sent back by a reorg and
+    // then replaced.
+    if (s.kind === "replaced") return `replaced:${s.chain.at(-1)?.by ?? ""}`;
+    // Confirmed, it may be the newest version of something replaced, however long ago: asked
+    // once (one lookup in the server's memory, never the node). A settled transaction follows no
+    // topic, so this does not wait for one; a server without the mempool engine answers 503,
+    // read as nothing. By what the page shows now, not by how it loaded.
+    if (s.kind === "confirmed" || (s.kind === "loading" && t?.status.confirmed === true)) {
+      return "confirmed";
+    }
+    if (l === "connecting") return false;
+    if (missing()) return "missing";
+    if (s.kind === "gone") return "gone";
+    return t ? "waiting" : false;
   };
   // The page's own abort signal, not the request's: an answer a newer request replaced still
   // records what it learned in the model.
@@ -464,6 +478,8 @@ function TransactionView(props: { txid: string }) {
               justConfirmed={justConfirmed()}
               reorged={reorged()}
               replaced={replaced()}
+              versions={replacements()?.versions}
+              later={replacements()?.replacedBy ?? []}
               relatives={relatives() ?? undefined}
               liveness={live()}
             />
@@ -501,7 +517,14 @@ function Departed(props: { shown: Shown; replacements: Replacements | null | und
       }
     >
       <Match when={props.shown.kind === "replaced" && props.shown} keyed>
-        {(s) => <ReplacedNotice chain={s.chain} truncated={s.truncated} />}
+        {(s) => (
+          <ReplacedNotice
+            chain={s.chain}
+            truncated={s.truncated}
+            versions={props.replacements?.versions}
+            later={props.replacements?.replacedBy}
+          />
+        )}
       </Match>
       <Match when={props.shown.kind === "evicted"}>
         <Notice tone="negative" title="Dropped from the mempool without being mined">
@@ -531,7 +554,12 @@ function Notice(props: { tone: "negative" | "caution"; title: string; children: 
   );
 }
 
-function ReplacedNotice(props: { chain: ReplacementLink[]; truncated: boolean }) {
+function ReplacedNotice(props: {
+  chain: ReplacementLink[];
+  truncated: boolean;
+  versions?: string[] | undefined;
+  later?: ReplacementLink[] | undefined;
+}) {
   const first = () => props.chain[0];
   return (
     <Notice tone="negative" title="This version was replaced">
@@ -552,7 +580,12 @@ function ReplacedNotice(props: { chain: ReplacementLink[]; truncated: boolean })
           </p>
         )}
       </Show>
-      <Chain chain={props.chain} truncated={props.truncated} />
+      <Chain
+        chain={props.chain}
+        truncated={props.truncated}
+        versions={props.versions ?? []}
+        later={props.later ?? []}
+      />
     </Notice>
   );
 }
@@ -615,6 +648,10 @@ function Body(props: {
   reorged: number | undefined;
   /** What it replaced, as far as the server remembers. */
   replaced: ReplacementLink[];
+  /** Its line of versions, from the replacements route: undefined until asked. */
+  versions: string[] | undefined;
+  /** What replaced it, from the same route: how many inputs each pair shares. */
+  later: ReplacementLink[];
   relatives: Relatives | undefined;
   liveness: Liveness;
 }) {
@@ -1074,7 +1111,14 @@ function Body(props: {
       </Switch>
       <Switch>
         <Match when={props.shown.kind === "replaced" && props.shown} keyed>
-          {(r) => <ReplacedNotice chain={r.chain} truncated={r.truncated} />}
+          {(r) => (
+            <ReplacedNotice
+              chain={r.chain}
+              truncated={r.truncated}
+              versions={props.versions}
+              later={props.later}
+            />
+          )}
         </Match>
         <Match when={props.shown.kind === "evicted"}>
           <Notice tone="negative" title="Dropped from the mempool without being mined">
@@ -1093,6 +1137,16 @@ function Body(props: {
           )}
         </Match>
       </Switch>
+      {/* A version that replaced others, and stands: what changed from the one before. */}
+      <Show when={props.shown.kind !== "replaced" && props.versions}>
+        {(line) => (
+          <Show when={line().length > 1}>
+            <div class="tx-versions">
+              <CompareLine versions={line()} here={props.tx.txid} />
+            </div>
+          </Show>
+        )}
+      </Show>
       <Show when={!settled()}>
         <ol class="tx-timeline" aria-label="Status">
           {/* By position: each change of status updates the three steps in place, never remakes them. */}
