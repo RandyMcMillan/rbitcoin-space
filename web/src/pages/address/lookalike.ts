@@ -1,86 +1,18 @@
 // Address poisoning: someone grinds an address whose ends agree with one the reader uses, then puts
 // it into the reader's history with a small payment, hoping it is copied from there later. The rule,
 // its thresholds and their arithmetic are in docs/FRONTEND.md ("Lookalike addresses").
-import { recognise } from "../../lib/address";
 import type { Transaction } from "../../lib/esplora";
+import {
+  addressesOf,
+  agreeHead,
+  agreeTail,
+  type Form,
+  form,
+  type Lookalike,
+} from "../../lib/lookalike";
 
-/** Characters after the type prefix that must agree with the page's own address. */
-export const OWN_HEAD = 2;
-/** Characters after the type prefix that must agree between two other addresses in the history. */
-export const PAIR_HEAD = 3;
-/** Last characters that must agree, for either. Every short form on the site keeps the last eight. */
-export const TAIL = 4;
-
-/** One address in a transaction that looks like another. */
-export interface Lookalike {
-  /** The address in this transaction. */
-  here: string;
-  /** The address it looks like: the page's own, or one elsewhere in the loaded history. */
-  like: string;
-  /** `like` is the page's own address. */
-  own: boolean;
-  /** How many characters after the type prefix agree, and how many at the end. */
-  head: number;
-  tail: number;
-  /** The type prefix both share (`bc1q`, `1`), shown apart from the agreeing characters. */
-  prefix: number;
-}
-
-/** Keys start with the kind: type, network prefix and, for bech32, length. Only one kind compares. */
-interface Form {
-  /** The type prefix's length: base58's version character, bech32's hrp, `1` and version. */
-  prefix: number;
-  /** Lower case. Bech32 has one case; base58 is compared without it, as a glance reads it. */
-  folded: string;
-  /** The ends the page's own address is compared on, and the ends two others are. */
-  ownKey: string;
-  pairKey: string;
-}
-
-function form(address: string): Form | undefined {
-  const r = recognise(address);
-  // Pay to anchor is one fixed address; silent payments never appear in a transaction.
-  if (!r || r.type === "p2a" || r.type === "sp") return undefined;
-  const folded = address.toLowerCase();
-  const bech32 = r.type !== "p2pkh" && r.type !== "p2sh";
-  const prefix = bech32 ? folded.lastIndexOf("1") + 2 : 1;
-  if (folded.length < prefix + PAIR_HEAD + TAIL) return undefined;
-  const kind = `${r.type}:${folded.slice(0, prefix)}${bech32 ? `:${folded.length}` : ""}`;
-  const tail = folded.slice(-TAIL);
-  const head = folded.slice(prefix, prefix + PAIR_HEAD);
-  return {
-    prefix,
-    folded,
-    ownKey: `${kind}|${head.slice(0, OWN_HEAD)}|${tail}`,
-    pairKey: `${kind}|${head}|${tail}`,
-  };
-}
-
-/** Characters two folded strings share from `from` forwards, or from the end backwards. */
-function agreeHead(a: string, b: string, from: number): number {
-  let n = 0;
-  while (from + n < a.length && a[from + n] === b[from + n]) n++;
-  return n;
-}
-function agreeTail(a: string, b: string): number {
-  let n = 0;
-  while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++;
-  return n;
-}
-
-/** Every address a transaction names, its inputs' previous outputs and its outputs, once each. */
-function addressesOf(tx: Transaction): Set<string> {
-  const seen = new Set<string>();
-  for (const i of tx.vin ?? []) {
-    const a = i.prevout?.scriptpubkey_address;
-    if (a) seen.add(a);
-  }
-  for (const o of tx.vout ?? []) {
-    const a = o.scriptpubkey_address;
-    if (a) seen.add(a);
-  }
-  return seen;
-}
+export type { Lookalike } from "../../lib/lookalike";
+export { OWN_HEAD, PAIR_HEAD, TAIL } from "../../lib/lookalike";
 
 /**
  * The lookalikes in a loaded history, by txid; a transaction with none is absent. Linear in the

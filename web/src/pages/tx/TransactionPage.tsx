@@ -1,4 +1,4 @@
-import { useParams } from "@solidjs/router";
+import { useLocation, useParams } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
@@ -33,6 +33,7 @@ import { feeColor, formatSize, groupDigits, MISSING, truncateMiddle } from "../.
 import { NETWORK_NAMES, paths } from "../../lib/network";
 import { useLiveStatus } from "../../lib/live";
 import { useNetwork, usePageTitle } from "../../lib/page";
+import { type Handover, readHandover } from "../../lib/lookalike";
 import { fetchSummaries } from "../../lib/summary";
 import { type ReplacementLink, type TxMessage, txTopic } from "../../lib/track-topics";
 import { TxLightning } from "../lightning/TxLightning";
@@ -40,6 +41,7 @@ import { Code } from "./Code";
 import { CompareLine } from "./Compare";
 import { Flow, type Selection } from "./Flow";
 import { Inspector } from "./Inspector";
+import { LookalikeNotice, lookalikeTitle, marksOf } from "./Lookalike";
 import { Chain, Follow, Group, leftWithParent, LiveState, POLL_MS, Strip } from "./Live";
 import {
   announcement as sayChange,
@@ -141,6 +143,19 @@ function TransactionView(props: { txid: string }) {
   };
 
   const ready = () => (tx.state === "ready" ? tx() : undefined);
+  // An address page's flagged row may hand over its findings in the history entry's state; only
+  // those this transaction bears out are shown (lib/lookalike.ts).
+  const location = useLocation();
+  const handed = createMemo(() => {
+    const t = ready();
+    return t ? readHandover(location.state, t, network()) : undefined;
+  });
+  // Said politely when the notice shows, cleared when it goes. A memo of the words, so a refresh
+  // that hands back the same findings writes nothing and is not said again.
+  const lookalikeSaid = createMemo(() => {
+    const h = handed();
+    return h ? lookalikeTitle(h) : "";
+  });
   /** The model's clock when the transaction was last asked for. */
   let txAsked = 0;
   /** Numbers the page's HTTP questions about the status, the first load being 0. */
@@ -509,6 +524,9 @@ function TransactionView(props: { txid: string }) {
       <p class="visually-hidden" aria-live="polite">
         {announcement()}
       </p>
+      <p class="visually-hidden" aria-live="polite">
+        {lookalikeSaid()}
+      </p>
       <Switch fallback={<Skeleton />}>
         <Match when={missing() && shownNow()} keyed>
           {(s) => <Departed shown={s} replacements={replacements()} later={later()} />}
@@ -533,6 +551,7 @@ function TransactionView(props: { txid: string }) {
               later={later()}
               relatives={relatives() ?? undefined}
               liveness={live()}
+              lookalike={handed()}
             />
           )}
         </Match>
@@ -728,6 +747,8 @@ function Body(props: {
   later: ReplacementLink[];
   relatives: Relatives | undefined;
   liveness: Liveness;
+  /** Lookalikes handed over from an address page's flagged row, checked against this transaction. */
+  lookalike: Handover | undefined;
 }) {
   const network = useNetwork();
   const coinbase = () => isCoinbase(props.tx);
@@ -1002,8 +1023,10 @@ function Body(props: {
   const rbf =
     "Until it confirms it can be replaced by a transaction spending the same coins that pays more: nodes relay one whatever its sequence numbers say (full replace-by-fee).";
 
+  const marks = createMemo(() => marksOf(props.lookalike));
   return (
     <>
+      <Show when={props.lookalike}>{(h) => <LookalikeNotice h={h()} />}</Show>
       {/* The answer first: where it is, what it paid, what it moved, and when. */}
       <dl class="tx-answer panel" aria-label="Summary">
         <div class="tx-answer__cell tx-answer__cell--where">
@@ -1273,7 +1296,13 @@ function Body(props: {
               This node has pruned the inputs of transactions this old, so some are missing.
             </p>
           </Show>
-          <Flow tx={props.tx} outspends={props.spends} selected={selected()} onSelect={select} />
+          <Flow
+            tx={props.tx}
+            outspends={props.spends}
+            selected={selected()}
+            onSelect={select}
+            lookalike={marks()}
+          />
         </section>
 
         {/* The facts that are left; an input's or output's inspector takes their place. */}
@@ -1371,6 +1400,7 @@ function Body(props: {
                   selected={s}
                   outspends={props.spends}
                   onClose={() => setSelected(null)}
+                  lookalike={marks()}
                   ref={(el) => {
                     inspectorHeading = el;
                   }}
