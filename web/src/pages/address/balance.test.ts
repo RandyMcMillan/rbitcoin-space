@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Stamped } from "../../lib/api";
+import { ApiError, type Stamped } from "../../lib/api";
 import type { TxSummary } from "../../lib/esplora";
 import {
   advance,
@@ -162,6 +162,29 @@ describe("loadHistory", () => {
     expect(h.rows).toHaveLength(50);
   });
 
+  it("as of a block, a later page answered 404 means the block left the chain: no partial chart", async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => row(300 - i, 100));
+    const n = node(rows, 77_777, 300);
+    const pinned = "a".repeat(64);
+    const gone = (p: string) =>
+      p.includes(`/txs/summary/${txid(276)}`)
+        ? Promise.reject(new ApiError(404, "Not found."))
+        : n.fetch(p);
+    await expect(loadHistory(BASE, gone, MAX_PAGES, undefined, pinned)).rejects.toMatchObject({
+      status: 404,
+    });
+    // Its totals are never asked: they could come from before the block left.
+    expect(n.asked.some((p) => p === `${BASE}?asof=${pinned}`)).toBe(false);
+    // Any other failure of a later page keeps the pages already in, anchored, as before.
+    const slow = (p: string) =>
+      p.includes(`/txs/summary/${txid(276)}`)
+        ? Promise.reject(new ApiError(504, "Request timed out."))
+        : n.fetch(p);
+    const h = await loadHistory(BASE, slow, MAX_PAGES, undefined, pinned);
+    expect(h).toMatchObject({ complete: false, balance: 77_777, total: 300 });
+    expect(h.rows).toHaveLength(25);
+  });
+
   it("knows a history of exactly the cap is whole when the totals agree", async () => {
     const rows = Array.from({ length: MAX_ROWS }, (_, i) => row(MAX_ROWS - i, 100));
     const h = await loadHistory(BASE, node(rows, MAX_ROWS * 100, MAX_ROWS).fetch);
@@ -177,6 +200,20 @@ describe("loadHistory", () => {
     expect(n.asked).toStrictEqual([`${BASE}?asof=${TIP}`]);
     expect(h).toMatchObject({ complete: false, balance: 99_999, total: 5000 });
     expect(h.rows).toHaveLength(SUMMARY_PAGE);
+  });
+
+  it("pins every request to the block it is given, the first page too, stamped or not", async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => row(300 - i, 100));
+    const n = node(rows, 55_555, 300);
+    const pinned = "a".repeat(64);
+    const unstamped = (p: string) => n.fetch(p).then((r) => ({ ...r, tip: undefined }));
+    const h = await loadHistory(BASE, unstamped, 2, undefined, pinned);
+    expect(n.asked).toStrictEqual([
+      `${BASE}/txs/summary?asof=${pinned}`,
+      `${BASE}/txs/summary/${txid(276)}?asof=${pinned}`,
+      `${BASE}?asof=${pinned}`,
+    ]);
+    expect(h).toMatchObject({ complete: false, balance: 55_555, total: 300 });
   });
 
   it("refuses to anchor a partial history to totals of an unknown block", async () => {

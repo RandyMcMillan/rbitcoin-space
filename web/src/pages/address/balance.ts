@@ -2,7 +2,7 @@
 // history to load, how to anchor a partial one to the true balance, and how a live change joins
 // what is loaded. Pure but for `loadHistory`, which takes its fetcher. docs/FRONTEND.md "The
 // address balance chart".
-import type { Stamped } from "../../lib/api";
+import { isNotFound, type Stamped } from "../../lib/api";
 import type { AddressStats, TxSummary } from "../../lib/esplora";
 
 /** Rows in one page of `/txs/summary`: the node's fixed page size (rbitcoin v0.9.2). */
@@ -63,16 +63,19 @@ const confirmed = (rows: readonly TxSummary[]) => rows.filter((r) => r.height > 
 /**
  * The newest history, at most `pages` pages, every page as of the first's block. When it stops
  * short of the first transaction (the cap, or a later page that failed), the address's totals as
- * of that block anchor it. `given` is the first page when it is already in.
+ * of that block anchor it. `given` is the first page when it is already in. `asof` pins every
+ * request, the first too, to that block hash.
  */
 export async function loadHistory(
   base: string,
   fetch: (path: string) => Promise<Stamped<unknown>>,
   pages = MAX_PAGES,
   given?: Stamped<unknown>,
+  asof?: string,
 ): Promise<History> {
-  const first = given ?? (await fetch(`${base}/txs/summary`));
-  const tip = first.tip?.hash;
+  const first =
+    given ?? (await fetch(`${base}/txs/summary${asof === undefined ? "" : `?asof=${asof}`}`));
+  const tip = asof ?? first.tip?.hash;
   const pin = tip === undefined ? "" : `?asof=${tip}`;
   let page = readRows(first.value);
   const rows = [...page];
@@ -81,7 +84,9 @@ export async function loadHistory(
     try {
       // oxlint-disable-next-line no-await-in-loop -- each page continues after the last one's final row
       page = readRows((await fetch(`${base}/txs/summary/${last}${pin}`)).value);
-    } catch {
+    } catch (error) {
+      // As of a block, a 404 says the block left the best chain: nothing loaded may be shown.
+      if (asof !== undefined && isNotFound(error)) throw error;
       // A later page that fails (a node too slow to answer) leaves the newer ones, anchored below.
       break;
     }
