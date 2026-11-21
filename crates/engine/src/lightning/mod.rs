@@ -9,12 +9,13 @@ mod db;
 pub mod fees;
 mod graph;
 pub mod overview;
+pub mod record;
 mod sampler;
 
 pub use db::{
     InBlock, apply, apply_from, at, by_txids, channel, closed, continued, in_block, insert, latest,
-    lineage, node_closed, node_closes, node_spans, opened, past, penalties, record, series,
-    set_funding, unfunded,
+    lineage, node_close_rows, node_closed, node_closes, node_spans, opened, past, penalties,
+    record, series, set_funding, unfunded,
 };
 pub use graph::{
     Announcement, Bucket, GraphChannel, GraphNode, Inbound, Index, Link, Node, NodePast, NodePoint,

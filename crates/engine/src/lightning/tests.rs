@@ -1435,3 +1435,461 @@ async fn fee_history_records_a_return_after_dropped_outcomes() {
     );
     assert_eq!(heads.changed(A, 0), Some(T + 20));
 }
+
+/// A node's close record and the network's (`record`), from the store as the history leaves it.
+mod close_record {
+    use super::*;
+    use crate::lightning::record::{self, MINIMUM, Peer, WEEK, Week, week_of};
+
+    const X: [u8; 33] = [0x21; 33];
+    const Y: [u8; 33] = [0x22; 33];
+    const Z: [u8; 33] = [0x23; 33];
+    /// Monday 9 November 2026, 00:00 UTC.
+    const MONDAY: u64 = 1_794_182_400;
+
+    fn between(scid: u64, one: [u8; 33], two: [u8; 33]) -> Open {
+        Open {
+            node_one: one,
+            node_two: two,
+            ..open(scid, 1)
+        }
+    }
+
+    fn at(time: u64, kind: Kind, fee: Option<u64>, tx: u8) -> Close {
+        Close {
+            block: Block {
+                height: 900_000,
+                hash: BlockHash::from_byte_array([0xc1; 32]),
+                time,
+            },
+            txid: Txid::from_byte_array([tx; 32]),
+            kind,
+            fee,
+        }
+    }
+
+    const S1: u64 = 800_000 << 40 | 1 << 16;
+    const S2: u64 = 800_000 << 40 | 2 << 16;
+    const S3: u64 = 800_000 << 40 | 3 << 16;
+    const S4: u64 = 800_000 << 40 | 4 << 16;
+    const S5: u64 = 800_000 << 40 | 5 << 16;
+
+    /// X–Y cooperative and force, X–Z a force close later swept as a breach, Y–Z other (its fee
+    /// unknown), X–Z open: in two weeks.
+    async fn history(s: &Store) {
+        let sweep = Penalty {
+            block: block(800_030, 0xd1),
+            txid: Txid::from_byte_array([0x99; 32]),
+        };
+        apply(
+            s,
+            vec![
+                Change::Opened(between(S1, X, Y)),
+                Change::Opened(between(S2, Y, X)),
+                Change::Opened(between(S3, X, Z)),
+                Change::Opened(between(S4, Y, Z)),
+                Change::Opened(between(S5, Z, X)),
+                Change::Closed(
+                    between(S1, X, Y),
+                    at(MONDAY + 60, Kind::Cooperative, Some(200), 1),
+                ),
+                Change::Closed(
+                    between(S2, Y, X),
+                    at(MONDAY + WEEK + 60, Kind::Force, Some(3_000), 2),
+                ),
+                Change::Closed(
+                    between(S3, X, Z),
+                    at(MONDAY + WEEK + 120, Kind::Force, Some(500), 3),
+                ),
+                Change::Penalty(S3, sweep),
+                Change::Closed(between(S4, Y, Z), at(MONDAY + 90, Kind::Other, None, 4)),
+            ],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn of(s: &Store, node: [u8; 33]) -> record::NodeRecord {
+        let (rows, more) = node_close_rows(s, node, record::MAX_CLOSES).await.unwrap();
+        assert!(!more);
+        record::node(&node, &rows, MONDAY, MONDAY + WEEK + 3_600)
+    }
+
+    async fn network(s: &Store) -> record::Record {
+        let rows = overview::rows(s).await.unwrap();
+        record::network(&rows, MONDAY, MONDAY + WEEK + 3_600)
+    }
+
+    #[test]
+    fn weeks_start_on_monday_utc() {
+        assert_eq!(week_of(MONDAY), MONDAY);
+        assert_eq!(week_of(MONDAY + WEEK - 1), MONDAY);
+        assert_eq!(week_of(MONDAY - 1), MONDAY - WEEK);
+        // Before the first Monday after 1970 there is nothing to start on: no panic, zero.
+        assert_eq!(week_of(0), 0);
+        assert_eq!(week_of(4 * DAY), 4 * DAY);
+    }
+
+    #[tokio::test]
+    async fn each_close_counts_once_in_its_kind_and_in_both_ends_records() {
+        let t = temp();
+        let s = &t.store;
+        history(s).await;
+        // Cooperative, force, penalty, other.
+        let x = of(s, X).await;
+        assert_eq!(x.record.total.closes, [1, 1, 1, 0]);
+        let y = of(s, Y).await;
+        assert_eq!(y.record.total.closes, [1, 1, 0, 1]);
+        let z = of(s, Z).await;
+        assert_eq!(z.record.total.closes, [0, 0, 1, 1]);
+        // The network counts each channel once: four closes, one of each kind.
+        let n = network(s).await;
+        assert_eq!(n.total.closes, [1, 1, 1, 1]);
+        assert_eq!(n.total.total(), 4);
+        // Two weeks, each close in its own.
+        assert_eq!(
+            x.record.weeks,
+            [
+                Week {
+                    time: MONDAY,
+                    closes: [1, 0, 0, 0]
+                },
+                Week {
+                    time: MONDAY + WEEK,
+                    closes: [0, 1, 1, 0]
+                },
+            ]
+        );
+        assert_eq!(n.weeks[0].closes, [1, 0, 0, 1]);
+        assert_eq!(n.weeks[1].closes, [0, 1, 1, 0]);
+    }
+
+    #[tokio::test]
+    async fn fees_sum_by_kind_over_the_closes_whose_fee_is_known() {
+        let t = temp();
+        let s = &t.store;
+        history(s).await;
+        let x = of(s, X).await.record.total;
+        assert_eq!((x.fees, x.known), ([200, 3_000, 500, 0], [1, 1, 1, 0]));
+        let y = of(s, Y).await.record.total;
+        // The other close's fee is unknown: counted as a close, not as a fee of zero.
+        assert_eq!((y.fees, y.known), ([200, 3_000, 0, 0], [1, 1, 0, 0]));
+        let n = network(s).await.total;
+        assert_eq!((n.fees, n.known), ([200, 3_000, 500, 0], [1, 1, 1, 0]));
+    }
+
+    #[tokio::test]
+    async fn peers_are_listed_with_their_closes_most_forced_first() {
+        let t = temp();
+        let s = &t.store;
+        history(s).await;
+        let x = of(s, X).await;
+        // Y: a cooperative close and a force close; Z: a penalty. One commitment each, Y more
+        // closes. The open channel with Z adds nothing.
+        assert_eq!(
+            x.peers,
+            [
+                Peer {
+                    id: Y,
+                    closes: [1, 1, 0, 0]
+                },
+                Peer {
+                    id: Z,
+                    closes: [0, 0, 1, 0]
+                },
+            ]
+        );
+        assert_eq!(x.peers[0].forced(), 1);
+        let z = of(s, Z).await;
+        assert_eq!(
+            z.peers[0].id, X,
+            "a penalty before a close by neither protocol"
+        );
+        assert_eq!(z.peers[1].closes, [0, 0, 0, 1]);
+    }
+
+    #[tokio::test]
+    async fn undone_closes_and_penalties_leave_the_record_as_if_never_seen() {
+        let t = temp();
+        let s = &t.store;
+        history(s).await;
+        // The sweep leaves the chain: the breach reads as the force close it was.
+        apply(s, vec![Change::PenaltyUndone(S3)]).await.unwrap();
+        assert_eq!(of(s, X).await.record.total.closes, [1, 2, 0, 0]);
+        assert_eq!(network(s).await.total.closes, [1, 2, 0, 1]);
+        // The force close with Y leaves it too: the channel reads open, counted nowhere.
+        apply(s, vec![Change::CloseUndone(S2)]).await.unwrap();
+        let x = of(s, X).await;
+        assert_eq!(x.record.total.closes, [1, 1, 0, 0]);
+        assert_eq!(x.record.total.fees, [200, 500, 0, 0]);
+        assert_eq!(x.peers[0].id, Z);
+        assert_eq!(x.peers[1].closes, [1, 0, 0, 0]);
+        assert_eq!(of(s, Y).await.record.total.closes, [1, 0, 0, 1]);
+        // The new chain closes it cooperatively: it counts once, in its new kind.
+        apply(
+            s,
+            vec![Change::Closed(
+                between(S2, Y, X),
+                at(MONDAY + WEEK + 600, Kind::Cooperative, Some(250), 9),
+            )],
+        )
+        .await
+        .unwrap();
+        assert_eq!(of(s, X).await.record.total.closes, [2, 1, 0, 0]);
+        assert_eq!(network(s).await.total.closes, [2, 1, 0, 1]);
+        // An open undone takes its row: Y–Z's close leaves both records.
+        apply(s, vec![Change::OpenUndone(S4)]).await.unwrap();
+        assert_eq!(of(s, Z).await.record.total.closes, [0, 1, 0, 0]);
+        assert_eq!(network(s).await.total.closes, [2, 1, 0, 0]);
+    }
+
+    #[tokio::test]
+    async fn a_node_with_no_close_has_an_empty_record_with_every_week() {
+        let t = temp();
+        let s = &t.store;
+        history(s).await;
+        let none = of(s, [0x24; 33]).await;
+        assert_eq!(none.record.total, record::Tally::default());
+        assert!(none.peers.is_empty());
+        assert_eq!(none.record.weeks.len(), 2);
+        assert!(none.record.weeks.iter().all(|w| w.closes == [0; 4]));
+        // An empty store: the network's record is all weeks, no closes.
+        let t = temp();
+        let n = network(&t.store).await;
+        assert_eq!((n.total.total(), n.weeks.len()), (0, 2));
+    }
+
+    #[tokio::test]
+    async fn a_row_whose_two_ends_are_the_node_counts_once_and_lists_no_peer() {
+        let t = temp();
+        let s = &t.store;
+        history(s).await;
+        const S6: u64 = 800_000 << 40 | 6 << 16;
+        apply(
+            s,
+            vec![Change::Closed(
+                between(S6, X, X),
+                at(MONDAY + 30, Kind::Force, Some(700), 6),
+            )],
+        )
+        .await
+        .unwrap();
+        let x = of(s, X).await;
+        // One more force close and its fee, once; the peers as before.
+        assert_eq!(x.record.total.closes, [1, 2, 1, 0]);
+        assert_eq!(x.record.total.fees, [200, 3_700, 500, 0]);
+        assert!(x.peers.iter().all(|p| p.id != X));
+        assert_eq!(x.peers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_record_reads_only_the_newest_closes_and_says_when_there_are_more() {
+        let t = temp();
+        let s = &t.store;
+        // Five closes of X, one a block, with Y and Z in turn; Y's end is node one on some.
+        let changes: Vec<Change> = (0..5u32)
+            .map(|i| {
+                let scid = (800_100 + u64::from(i)) << 40;
+                let o = if i % 2 == 0 {
+                    between(scid, X, Y)
+                } else {
+                    between(scid, Z, X)
+                };
+                let mut c = at(MONDAY + u64::from(i), Kind::Cooperative, Some(10), 1);
+                c.block.height = 900_000 + i;
+                Change::Closed(o, c)
+            })
+            .collect();
+        apply(s, changes).await.unwrap();
+        let (all, more) = node_close_rows(s, X, 5).await.unwrap();
+        assert_eq!((all.len(), more), (5, false));
+        let (newest, more) = node_close_rows(s, X, 3).await.unwrap();
+        assert!(more);
+        assert_eq!(
+            newest.iter().map(|r| r.time - MONDAY).collect::<Vec<_>>(),
+            [4, 3, 2],
+            "newest close first, across both ends"
+        );
+        assert_eq!(newest.iter().map(|r| r.peer).collect::<Vec<_>>(), [Y, Z, Y]);
+    }
+
+    #[test]
+    fn weeks_are_bounded_and_closes_outside_them_land_at_the_ends() {
+        // Twenty years from a start to now: only the newest ten years of weeks are held, and a
+        // close older than them counts in the first one held.
+        let now = MONDAY;
+        let from = MONDAY - 20 * 52 * WEEK;
+        let row = |time| overview::Row {
+            nodes: [X, Y],
+            capacity: 1,
+            open: 0,
+            close: Some((time, Kind::Force)),
+            fee: None,
+        };
+        let r = record::network(&[row(from), row(now + 3 * WEEK)], from, now);
+        assert_eq!(r.weeks.len(), record::MAX_WEEKS);
+        assert_eq!(r.weeks.last().unwrap().time, MONDAY);
+        assert_eq!(r.weeks[0].closes, [0, 1, 0, 0]);
+        assert_eq!(r.weeks.last().unwrap().closes, [0, 1, 0, 0]);
+        assert_eq!(r.total.closes, [0, 2, 0, 0]);
+        // A start after now (a clock behind the store) gives one week, not none.
+        assert_eq!(record::network(&[], now + WEEK, now).weeks.len(), 1);
+    }
+
+    #[test]
+    fn shares_are_given_from_the_minimum_and_counts_only_below_it() {
+        let below = [MINIMUM - 2, 1, 0, 0];
+        assert_eq!(record::shares(&below), None);
+        let at = [MINIMUM - 5, 4, 0, 1];
+        let s = record::shares(&at).unwrap();
+        assert_eq!(s, [75.0, 20.0, 0.0, 5.0]);
+        // One decimal, so a large network's small share is not rounded away.
+        let s = record::shares(&[1_638, 158, 0, 6]).unwrap();
+        assert_eq!(s, [90.9, 8.8, 0.0, 0.3]);
+        assert_eq!(record::shares(&[0; 4]), None);
+    }
+}
+
+/// What one close record costs for nodes with very long histories: 50,000 closes across 5,000
+/// peers, and 200,000 across 20,000. `before` reads every closed row and tallies them, as the
+/// route did before it read only the newest; `after` reads the newest `record::MAX_CLOSES`. Each
+/// case in a process of its own, so one's freed memory does not hide the other's peak. The store
+/// (about 150 MB) is built by the first run, in a directory on disk:
+///
+/// ```bash
+/// for case in build before:50k after:50k before:200k after:200k; do
+///   RECORD_BENCH_DIR=~/.cache/record-bench RECORD_BENCH=$case \
+///     cargo test -p engine --release --lib -- --ignored record_bench
+/// done; cat ~/.cache/record-bench/report.txt
+/// ```
+#[tokio::test]
+#[ignore]
+async fn record_bench() {
+    use std::collections::HashMap;
+    use std::io::Write;
+    use std::time::Instant;
+
+    use crate::lightning::record;
+
+    fn status(field: &str) -> u64 {
+        let s = std::fs::read_to_string("/proc/self/status").unwrap();
+        let line = s.lines().find(|l| l.starts_with(field)).unwrap();
+        line.split_whitespace().nth(1).unwrap().parse().unwrap()
+    }
+
+    let dir = PathBuf::from(std::env::var("RECORD_BENCH_DIR").expect("RECORD_BENCH_DIR"));
+    let case = std::env::var("RECORD_BENCH").expect("RECORD_BENCH");
+    let built = dir.join("regtest.sqlite").exists();
+    let store = Store::open(&dir, "regtest", Options::default()).unwrap();
+    const A: [u8; 33] = [0x31; 33];
+    const B: [u8; 33] = [0x32; 33];
+    let peer = |n: u32| {
+        let mut k = [0x02; 33];
+        k[1..5].copy_from_slice(&n.to_be_bytes());
+        k
+    };
+    // Either end, one close in ten a force close, a block a close.
+    let mut scid = 0u64;
+    for (node, closes, peers) in [(A, 50_000u32, 5_000u32), (B, 200_000, 20_000)] {
+        if built {
+            break;
+        }
+        for chunk in 0..closes / 10_000 {
+            let mut batch = Vec::new();
+            for i in chunk * 10_000..(chunk + 1) * 10_000 {
+                scid += 1;
+                let other = peer(i % peers + if node == A { 0 } else { 100_000 });
+                let (one, two) = if i % 2 == 0 {
+                    (node, other)
+                } else {
+                    (other, node)
+                };
+                batch.push((scid, one, two, i));
+            }
+            store
+                .write(move |sql| {
+                    let mut ins = sql.prepare(
+                        "INSERT INTO ln_channels (scid, node_one, node_two, capacity, open_hash, \
+                         open_time, close_height, close_hash, close_time, close_txid, close_kind, \
+                         close_fee) VALUES (?1, ?2, ?3, 1000000, ?4, 1700000000, ?5, ?4, ?6, ?7, ?8, ?9)",
+                    )?;
+                    for (scid, one, two, i) in &batch {
+                        let i = i64::from(*i);
+                        ins.execute(crate::store::params![
+                            i64::try_from(*scid).unwrap(),
+                            one.to_vec(),
+                            two.to_vec(),
+                            vec![0u8; 32],
+                            700_000 + i / 3,
+                            1_700_000_000 + i * 60,
+                            scid.to_be_bytes().repeat(4),
+                            i64::from(i % 10 == 0),
+                            300 + i % 500
+                        ])?;
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+    }
+    // Building is a run of its own: what it freed would hide a peak measured after it.
+    if case == "build" {
+        store.close().await;
+        return;
+    }
+    let now = 1_700_000_000 + 200_000 * 60;
+    let (way, size) = case.split_once(':').unwrap();
+    let node = if size == "50k" { A } else { B };
+    let base = status("VmRSS:");
+    let t = Instant::now();
+    let line = if way == "before" {
+        // Every closed row as a channel, then the tally and every peer sorted.
+        let rows = node_closes(&store, node).await.unwrap();
+        let mut kinds = [0u32; 4];
+        let mut weeks: HashMap<u64, [u32; 4]> = HashMap::new();
+        let mut peers: HashMap<[u8; 33], [u32; 4]> = HashMap::new();
+        for c in &rows {
+            let close = c.close.unwrap();
+            let k = close.kind as usize;
+            kinds[k] += 1;
+            weeks.entry(record::week_of(close.block.time)).or_default()[k] += 1;
+            let p = if c.open.node_one == node {
+                c.open.node_two
+            } else {
+                c.open.node_one
+            };
+            peers.entry(p).or_default()[k] += 1;
+        }
+        let mut list: Vec<_> = peers.into_iter().collect();
+        list.sort_unstable_by(|a, b| {
+            (b.1[1] + b.1[2])
+                .cmp(&(a.1[1] + a.1[2]))
+                .then(a.0.cmp(&b.0))
+        });
+        format!("{} rows, {} peers", rows.len(), list.len())
+    } else {
+        let (rows, more) = node_close_rows(&store, node, record::MAX_CLOSES)
+            .await
+            .unwrap();
+        let r = record::node(&node, &rows, now - 400 * DAY, now);
+        format!(
+            "{} rows (more: {more}), {} peers",
+            rows.len(),
+            r.peers.len()
+        )
+    };
+    let took = t.elapsed();
+    let peak = status("VmHWM:").saturating_sub(base);
+    store.close().await;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("report.txt"))
+        .unwrap();
+    writeln!(
+        f,
+        "{case}: {took:?}, peak resident +{peak} kB over the open store, {line}"
+    )
+    .unwrap();
+}

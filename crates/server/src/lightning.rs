@@ -78,6 +78,8 @@ pub struct Lightning {
     /// never keep a clone, so at shutdown the owning task gets it back whole.
     peer: RwLock<Option<Arc<Peer>>>,
     stop: Notify,
+    /// Told each time an index is set, so the overview's first computation need not wait out a retry.
+    indexed: Notify,
     task: Mutex<Option<JoinHandle<()>>>,
     /// History records stored since start, and the sequence number of the last.
     records: AtomicU64,
@@ -115,6 +117,10 @@ pub struct Lightning {
     overview_read_us: AtomicU64,
     overview_us: AtomicU64,
     overview_failures: AtomicU64,
+    /// Times the overview began waiting for an index, and times setting one woke it: what the
+    /// tests observe of [`movers::keep`].
+    overview_waits: AtomicU64,
+    overview_wakes: AtomicU64,
 }
 
 impl std::fmt::Debug for Lightning {
@@ -134,6 +140,7 @@ impl Lightning {
             phase: Mutex::new(Phase::Starting),
             peer: RwLock::new(None),
             stop: Notify::new(),
+            indexed: Notify::new(),
             task: Mutex::new(None),
             records: AtomicU64::new(0),
             seq: AtomicU64::new(0),
@@ -157,6 +164,8 @@ impl Lightning {
             overview_read_us: AtomicU64::new(0),
             overview_us: AtomicU64::new(0),
             overview_failures: AtomicU64::new(0),
+            overview_waits: AtomicU64::new(0),
+            overview_wakes: AtomicU64::new(0),
         }
     }
 
@@ -214,6 +223,17 @@ impl Lightning {
     #[doc(hidden)]
     pub fn set_index(&self, index: Index) {
         *self.index.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(index));
+        self.indexed.notify_one();
+    }
+
+    /// How many times the overview began waiting for an index, and how many times setting one woke
+    /// it. For tests.
+    #[doc(hidden)]
+    pub fn overview_wakes(&self) -> (u64, u64) {
+        (
+            self.overview_waits.load(Ordering::Relaxed),
+            self.overview_wakes.load(Ordering::Relaxed),
+        )
     }
 
     /// Replaces the fee history's heads, as the index task loads them at its first round. Tests
@@ -1101,6 +1121,7 @@ pub fn routes() -> Router<Arc<NetworkContext>> {
         .merge(fees::routes())
         .merge(feed::routes())
         .merge(movers::routes())
+        .merge(record::routes())
         .merge(penalties::routes())
 }
 
@@ -1557,5 +1578,6 @@ mod index;
 mod movers;
 pub(crate) mod nodes;
 mod penalties;
+mod record;
 #[cfg(test)]
 mod tests;

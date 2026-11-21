@@ -11,6 +11,7 @@ use axum::body::Bytes;
 use axum::extract::{RawQuery, State};
 use axum::routing::get;
 use engine::lightning::overview::{self, Day, Mover, Movers};
+use engine::lightning::record::{self, Record};
 use engine::lightning::{self as store_ln, DAY, Index};
 use engine::store::Store;
 use serde_json::{Value, json};
@@ -22,7 +23,7 @@ use crate::error::ApiError;
 
 /// How often the figures are worked out again: the statistics sampler's period.
 const EVERY: Duration = Duration::from_secs(store_ln::EVERY);
-/// How soon a first computation is tried again while there is no index, or after a failure.
+/// How soon a computation is tried again after a failure.
 const RETRY: Duration = Duration::from_secs(5);
 /// The periods `?period=` names, and their length.
 const PERIODS: [(&str, u64); 3] = [("24h", DAY), ("1w", 7 * DAY), ("1m", 30 * DAY)];
@@ -30,22 +31,34 @@ const PERIODS: [(&str, u64); 3] = [("24h", DAY), ("1w", 7 * DAY), ("1m", 30 * DA
 const DAYS: u64 = 90;
 const DEFAULT_DAYS: u64 = 30;
 
-/// The last computation: each period's movers answer, encoded, and the closes of [`DAYS`] days.
+/// The last computation: each period's movers answer, encoded, the closes of [`DAYS`] days, and
+/// the network's close record since its history starts.
 #[derive(Debug)]
 pub(crate) struct Overview {
-    time: u64,
+    pub(crate) time: u64,
     movers: [Bytes; 3],
     closes: Vec<Day>,
+    /// When the close record starts: the history's start, or the oldest close if older.
+    pub(crate) record_from: Option<u64>,
+    pub(crate) network: Record,
 }
 
 /// Works the figures out every [`EVERY`] once the graph is indexed, until the peer stops.
 pub(crate) async fn keep(store: Arc<Store>, l: Arc<Lightning>) {
     loop {
-        let wait = match l.index() {
-            Some(index) if compute(&store, &l, Arc::clone(&index)).await => EVERY,
-            _ => RETRY,
-        };
-        tokio::time::sleep(wait).await;
+        match l.index() {
+            Some(index) if compute(&store, &l, Arc::clone(&index)).await => {
+                tokio::time::sleep(EVERY).await;
+            }
+            Some(_) => tokio::time::sleep(RETRY).await,
+            // No index yet: start as soon as one is set. Setting one is the only way one appears,
+            // and it leaves a permit, so this cannot miss it; the task is cancelled at shutdown.
+            None => {
+                l.overview_waits.fetch_add(1, Ordering::Relaxed);
+                l.indexed.notified().await;
+                l.overview_wakes.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 }
 
@@ -59,6 +72,7 @@ async fn compute(store: &Store, l: &Arc<Lightning>, index: Arc<Index>) -> bool {
     };
     let read = started.elapsed();
     let now = store_ln::unix_now();
+    let start = index.start;
     let work = tokio::task::spawn_blocking(move || {
         let started = Instant::now();
         let movers = PERIODS.map(|(name, span)| {
@@ -67,10 +81,12 @@ async fn compute(store: &Store, l: &Arc<Lightning>, index: Arc<Index>) -> bool {
             Bytes::from(serde_json::to_vec(&v).unwrap_or_default())
         });
         let closes = overview::closes(&rows, now, DAYS);
-        (movers, closes, started.elapsed())
+        let record_from = start.into_iter().chain(record::first_close(&rows)).min();
+        let network = record::network(&rows, record_from.unwrap_or(now), now);
+        (movers, closes, record_from, network, started.elapsed())
     })
     .await;
-    let Ok((movers, closes, took)) = work else {
+    let Ok((movers, closes, record_from, network, took)) = work else {
         l.overview_failures.fetch_add(1, Ordering::Relaxed);
         return false;
     };
@@ -78,6 +94,8 @@ async fn compute(store: &Store, l: &Arc<Lightning>, index: Arc<Index>) -> bool {
         time: now,
         movers,
         closes,
+        record_from,
+        network,
     }));
     let us = |d: Duration| d.as_micros().try_into().unwrap_or(u64::MAX);
     l.overview_read_us.store(us(read), Ordering::Relaxed);
