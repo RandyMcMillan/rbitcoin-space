@@ -509,6 +509,28 @@ export default function Chart(props: ChartProps) {
       rare: l.rare === true,
     })),
   ];
+
+  /**
+   * Each reading's widest figure over the whole chart, laid out unseen under the one shown, so the
+   * readout keeps its lines at every point: an exact amount's length varies, and a line more would
+   * move the plot from under the pointer. Width is reckoned in characters, a group's space as half
+   * of one; a sign is reserved both ways (`signs`), as `+` and `−` are not as wide in every font.
+   */
+  const widest = createMemo(() => {
+    const span = (t: string) => t.length - (t.match(/[ \u202F]/g)?.length ?? 0) / 2;
+    const out = readings(0).map((r) => r.value);
+    for (let i = 1; i < props.x.length; i++) {
+      readings(i).forEach((r, k) => {
+        if (span(r.value) > span(out[k] ?? "")) out[k] = r.value;
+      });
+    }
+    return out;
+  });
+  /** A reserve as its figure breaks (after its point), and with its sign the other way. */
+  const reserve = (t: string) => t.replace(".", ".\u200B");
+  const signs = (t: string) =>
+    /^[+−]/.test(t) ? `${t.startsWith("+") ? "−" : "+"}${t.slice(1)}` : "";
+
   const valueText = () => {
     const i = index();
     return `${when(i)}: ${readings(i)
@@ -655,7 +677,7 @@ export default function Chart(props: ChartProps) {
         <span class="chart__when num">{when(index())}</span>
         <ul class="chart__values">
           <For keyed={false} each={readings(index())}>
-            {(r) => (
+            {(r, k) => (
               <li
                 class={[
                   "chart__value",
@@ -671,7 +693,16 @@ export default function Chart(props: ChartProps) {
                   <span class={`chart__key chart__key--${r().kind}`} style={r().style} />
                 </Show>
                 <span class="chart__name">{r().short ?? r().name}</span>
-                <span class="chart__figure num">{r().value}</span>
+                {/* Over the reading's widest figure, drawn unseen by CSS so it is in no text. */}
+                <span
+                  class="chart__figure num"
+                  data-widest={reserve(widest()[k] ?? "")}
+                  data-widest-signed={reserve(signs(widest()[k] ?? ""))}
+                >
+                  <span class="chart__now">
+                    <Figure text={r().value} />
+                  </span>
+                </span>
               </li>
             )}
           </For>
@@ -957,4 +988,19 @@ function feeStrip(sy: Scale): { band: number; y: number; h: number }[] {
     const y = sy(b);
     return [{ band: k + 1, y, h: sy(a) - y }];
   });
+}
+
+/**
+ * A reading's figure, free to break after its point where the readout is too narrow for it whole
+ * (an exact amount at a phone's largest text size): never inside a group of its digits.
+ */
+function Figure(props: { text: string }) {
+  const at = () => props.text.indexOf(".");
+  return (
+    <Show when={at() >= 0} fallback={props.text}>
+      {props.text.slice(0, at() + 1)}
+      <wbr />
+      {props.text.slice(at() + 1)}
+    </Show>
+  );
 }
