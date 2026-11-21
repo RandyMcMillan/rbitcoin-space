@@ -11,7 +11,7 @@ A PR that adds a slower step must make room for it or move it out of the PR path
 | Job | Limit | Warm, 2026-11-13 |
 |---|---|---|
 | `rust` | 170 s | 92 to 121 s |
-| `e2e`, each of its four shards | 180 s | 62 to 93 s with three; 68 to 106 s with four, on 2026-11-14 ([below](#browser-test-shards)) |
+| `e2e`, each of its five shards | 180 s | 62 to 93 s with three; 68 to 106 s with four, on 2026-11-14; 97 to 162 s with five, on 2026-11-21 ([below](#browser-test-shards)) |
 | `web` | 75 s | 30 to 39 s |
 
 The owner raised the budget from 3 to 4 minutes on 2026-11-15, and each limit by about a quarter (from 135, 145 and 60 s), as the project grew: a `rust` job 2 s over its limit had failed a pull request that added one small test. The whole run is `changes`, the slowest job and `ci-ok`, so the 180 s shard limit leaves about a minute of the four.
@@ -22,7 +22,7 @@ The job's last step, [`.github/job-limit.sh`](../.github/job-limit.sh), writes t
 
 Make room in the same pull request; never raise a limit to pass. In order: shrink or delete a test that re-proves something slowly (a random test runs a few steps in the suite and its long form behind `#[ignore]`, with the command beside it); replace a real wait with an event or a paused clock; stop building what no test needs. Read the summary's slowest tests first. Raise a limit only in a pull request that does nothing else and says why the time is worth it.
 
-**An `e2e` shard is a job like any other:** each has the limit above and fails alone, and each lists its own slowest tests. Make room the same way. Moving tests from one shard to another is not making room: Playwright cuts the list by count, in file order, so every test added moves the cut. When one shard stays far above the others, or every shard is near its limit with its tests a small part of its time, a fourth shard is a limit change, made the same way: in a pull request that does nothing else, with three warm runs measured.
+**An `e2e` shard is a job like any other:** each has the limit above and fails alone, and each lists its own slowest tests. Make room the same way. Moving tests from one shard to another is not making room: Playwright cuts the list by count, in file order, so every test added moves the cut. When one shard stays far above the others, or every shard is near its limit with its tests a small part of its time, another shard is a limit change, made the same way: in a pull request that does nothing else, with three warm runs measured.
 
 ## How it stays fast
 
@@ -35,7 +35,7 @@ Make room in the same pull request; never raise a limit to pass. In order: shrin
 7. **Slow waits overlap.** The `e2e` job starts the regtest node and the browser download in the background, then compiles while the node mines.
 8. **Lean debug builds.** CI builds without full debug info to cut compile time and cache size. Some code is optimised even there: secp256k1's C library, which at `-O0` made signature checks most of the Lightning tests' time (a test of 1,500 announcements took 6.9 s; optimised, 0.3 s), and the link preview cards' drawing (`card`, its rasterizer and its compressor), which unoptimised took about a second a card. They build once into the cache.
 9. **The test binaries run at once.** [cargo-nextest](https://nexte.st) runs every test as its own process, eight at a time on the runner's four cores, since most slow tests wait on a socket or a timer ([`.config/nextest.toml`](../.config/nextest.toml)). `cargo test` ran the 28 test binaries one after another, each waiting for its slowest test. nextest is a prebuilt binary checked against a pinned checksum; it adds nothing to the product or the lockfile. Doc tests, which nextest does not run, run after it with `cargo test --doc`. Examples are not built for the tests: clippy already checks they compile.
-10. **Browser tests run as four shards, each on its runner's four cores.** The `e2e` job is a matrix of four runners. Each builds the server and frontend, starts its own node and server, and runs a quarter of the tests with four Playwright workers (`E2E_SHARD=i/n` in [`web/scripts/e2e.sh`](../web/scripts/e2e.sh), passed to Playwright's `--shard`). Playwright runs a project another depends on whole in every shard, so the script runs Playwright twice: the tests that share the node, sharded, then the tests that mine, sharded and with `--no-deps`. Each run writes a JUnit report, and the summary reads both.
+10. **Browser tests run as five shards, each on its runner's four cores.** The `e2e` job is a matrix of five runners. Each builds the server and frontend, starts its own node and server, and runs a fifth of the tests with four Playwright workers (`E2E_SHARD=i/n` in [`web/scripts/e2e.sh`](../web/scripts/e2e.sh), passed to Playwright's `--shard`). Playwright runs a project another depends on whole in every shard, so the script runs Playwright twice: the tests that share the node, sharded, then the tests that mine, sharded and with `--no-deps`. Each run writes a JUnit report, and the summary reads both.
 11. **Every job has a timeout of 10 minutes.** A hung job fails fast; a test past 30 s fails too (nextest's `slow-timeout`).
 
 ## Jobs
@@ -45,7 +45,7 @@ Make room in the same pull request; never raise a limit to pass. In order: shrin
 | `changes` | always | Decides which jobs below run. Pull requests run only the jobs their paths need; a `master` push runs every job when it touches code and none when it touches only docs |
 | `rust` | Rust (`crates/`, the cards' pictures in `fixtures/cards/`, and the load generator in `dev/load/`), lockfile, `.config/nextest.toml` or workflow changes | Format check, clippy with warnings denied, tests with nextest, doc tests |
 | `web` | `web/`, the files the frontend imports from `design/` (`tokens.css`, `logo.svg`, `fonts/`) or workflow changes | Type check (both tsconfigs), `oxlint` with type-aware rules and the `oxfmt` format check, unit tests, production build, bundle-size check |
-| `e2e` | anything `rust` or `web` runs for, or `dev/regtest/` | `bun run e2e` ([`FRONTEND.md`](FRONTEND.md#browser-tests)): the server and frontend built from the PR, a regtest node with the known chain, Playwright in headless Chromium. Four shards, each on a runner of its own |
+| `e2e` | anything `rust` or `web` runs for, or `dev/regtest/` | `bun run e2e` ([`FRONTEND.md`](FRONTEND.md#browser-tests)): the server and frontend built from the PR, a regtest node with the known chain, Playwright in headless Chromium. Five shards, each on a runner of its own |
 | `image` | anything `web` runs for, `Dockerfile` or `.dockerignore`; pull requests only | Builds the Docker image's frontend stage, so a Dockerfile that cannot build the frontend fails before merge. The Rust stage is left to the post-merge build |
 | `ci-ok` | always | Fails if any job above failed |
 
@@ -170,5 +170,16 @@ Two shards would leave too little room. Their slowest was 97 s, and a limit with
 | Whole run, from its creation | 136, 137 and 137 s | 125, 130 and 128 s |
 
 The cut by count was not what made the first shard heavy: its slow file was. With four, the first shard's tests took 132 to 151 s of summed time and the others' 92 to 181 s, which shard is heaviest changing from run to run. The tests that mine run one at a time after the rest, so the shard holding `live.mine.e2e.ts` adds 20 to 25 s.
+
+**A fifth shard, measured 2026-11-21**, 559 browser tests, warm. In the week since the fourth the tests had nearly doubled, and a shard on a slow runner no longer fitted its limit with every test passing: pull request #266, which adds no browser test, failed at 186 s on a second attempt; #269 failed at 183 s on a shard that ran 13 of the tests it adds (its `web` job failed too, on a unit test since fixed in #271); and on the push of `f0d3ce7` to `master` a shard took 185 s, which a push only warns of (that run's failure was its `web` job's, on a unit test's speed limit). A shard's time as the limit counts it:
+
+| | Four shards (`master` at `5a47b6a`, `2da1a1e`, `f818fd8` and `f0d3ce7`) | Five shards (three runs of [#270](https://github.com/smolcars/rbitcoin-space/pull/270), and a fourth after its rebase onto `f0d3ce7`) |
+|---|---|---|
+| `e2e`, each shard | 127, 153, 126 and 118 s; 110, 142, 191 and 127 s; 128, 145, 121 and 144 s; 119, 185, 133 and 148 s | 102, 102, 140, 114 and 116 s; 133, 124, 142, 119 and 133 s; 120, 125, 139, 108 and 103 s; 97, 99, 162, 110 and 114 s |
+| Whole run, from its start to its last job's end | not comparable: a push to `master` waits for the run before it | 170, 174, 162 and about 180 s |
+
+With five, a shard runs 105 or 106 of the tests that share the node, in 40 to 70 s on three of the runs and up to 88 s on the fourth, and 2 to 10 of those that mine, in 4 to 24 s. Four of the five shards then have 47 s or more under their limit. The third does not: it was the slowest every time, at 139 to 162 s, so it has 18 to 41 s.
+
+**What made a shard slow was the runner, during the tests, and no one test.** The summary's slowest tests were read first, as the rule above asks. The 191 s shard reached its first test in about 56 s, against 36 to 45 s on the pushes either side, but its tests then took 130 s where the same tests took 77 and 81 s: every file in it ran about 1.6 times as long (`palette.e2e.ts`, 46 tests, 198 s of summed time against 121 s; `policies.e2e.ts`, 9 tests, 103 s against 68 s; and so on down the list), and its slowest single test took 19 s against 9 s. There was no test to shrink that would have brought that run under its limit, which is why this is a shard and not a trimmed test. With five shards the cut falls differently: all 46 of the palette's tests are in the third shard, the one with 18 s to spare, and the policy pages' nine are in the fourth. So `palette.e2e.ts` is where room is to be made next, before a sixth shard.
 
 **Cold** (no cache: a new lockfile, toolchain or `rust-cache` key), `rust` took 165 s and `e2e` 107 to 150 s, so a run that rebuilds its dependencies can pass three minutes. The limits are not enforced on it; the next `master` push saves the cache.
