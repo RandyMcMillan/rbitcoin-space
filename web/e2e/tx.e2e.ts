@@ -19,9 +19,11 @@ test("a confirmed transaction names every output type and links where the money 
     const named = outputs.getByText(type, { exact: true }).first();
     await (wide ? expect(named).toBeVisible() : expect(named).toBeAttached());
   }
-  await expect(outputs).toContainText("OP_RETURN0.00000000 BTCUnspendable“mempool.based regtest”");
+  await expect(outputs).toContainText(
+    "OP_RETURN0.00 000 000 BTCUnspendable“mempool.based regtest”",
+  );
   // Amounts keep their unit for screen readers, though the cards show bare numbers.
-  await expect(outputs.getByText("1.00000000 BTC", { exact: true }).first()).toBeAttached();
+  await expect(outputs.getByText("1.00 000 000 BTC", { exact: true }).first()).toBeAttached();
   // spend_p2sh_p2a spent the P2SH and P2A outputs.
   await expect(
     outputs.getByRole("link", { name: `Spent in transaction ${chain.txs.spend_p2sh_p2a}` }),
@@ -114,9 +116,17 @@ test.describe("transactions the node no longer has", () => {
     // The full steps, struck through and dashed, keep their numbers in the middle too.
     expect(await stepsOffCentre(page, "a replaced version")).toEqual([]);
 
+    // What changed: the one output paid 384 sats less, which went to the fee.
+    const changed = page.getByRole("region", { name: "What changed" });
+    await expect(changed.getByRole("listitem")).toHaveCount(1);
+    await expect(changed.getByRole("listitem")).toContainText("Changed");
+    await expect(changed).toContainText("+384 sats");
+
     // Opened later, the node no longer has it, and the server still says what happened.
     await page.reload();
     await expect(page.getByText("This version was replaced")).toBeVisible();
+    // The outputs too: the server kept them while it waited.
+    await expect(changed.getByRole("listitem")).toContainText("Changed");
   });
 });
 

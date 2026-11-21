@@ -72,7 +72,9 @@ export const paths = {
   tx: (txid: string) => `/tx/${segment(txid)}`,
   /** Broadcasting a transaction pasted as hex. The hex is never in the path. */
   push: () => "/tx/push",
-  address: (address: string) => `/address/${segment(address)}`,
+  /** An address, or the address as of the block at height `at` when given. */
+  address: (address: string, at?: number) =>
+    `/address/${segment(address)}${at === undefined ? "" : `?at=${segment(at)}`}`,
   /** The mining page, for a period such as `1m` when given. */
   mining: (period?: string) =>
     period === undefined ? "/mining" : `/mining?period=${encodeURIComponent(period)}`,
@@ -96,6 +98,9 @@ export const paths = {
   /** The mempool's history, for an interval such as `1w` when given. */
   mempool: (interval?: string) =>
     interval === undefined ? "/mempool" : `/mempool?interval=${encodeURIComponent(interval)}`,
+  /** How this server's fee recommendations have done, over a window such as `24h` when given. */
+  feeScore: (window?: string) =>
+    window === undefined ? "/fees/score" : `/fees/score?window=${encodeURIComponent(window)}`,
   /** Looking up an Ark VTXO. */
   ark: () => "/ark",
   /** An Ark VTXO by its `<txid>:<vout>`, on whichever implementation knows it. */
@@ -112,6 +117,8 @@ export const paths = {
   /** The decoder, the pasted string in the fragment, which no server sees. On every network. */
   decode: (text?: string) =>
     text === undefined || text === "" ? "/decode" : `/decode#${encodeURIComponent(text)}`,
+  /** Checking an OpenTimestamps proof; the files stay in the page, so the path never names them. */
+  timestamp: () => "/timestamp",
   /** Recent replacements, newest first; only those that replaced without signalling when asked. */
   rbf: (fullRbf = false) => (fullRbf ? "/rbf?view=full-rbf" : "/rbf"),
 };

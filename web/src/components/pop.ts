@@ -1,12 +1,10 @@
-// The page's small pop-ups (an exact amount, the network menu): one open at a time, closed by a
+// The page's small pop-ups (a note, the network menu, a QR code): one open at a time, closed by a
 // press outside, Escape, and, where asked, a scroll that carries its button away. Not the browser's
 // popover: while a top-layer element shows, iOS Safari repaints the band behind its toolbar and the
 // page stops above it (WebKit bug 302272).
 //
 // A press outside only closes it (`absorb`): the reader is dismissing it, as with a native menu, and
-// a tap that also followed the link beneath it took them to another page. The one exception is a
-// press on another pop-up of the same kind (`through`): one tap moves an exact amount's note from
-// one figure to the next, as it did before, so figures read side by side.
+// a tap that also followed the link beneath it took them to another page.
 
 let closeOpen: (() => void) | undefined;
 
@@ -17,7 +15,7 @@ let closeOpen: (() => void) | undefined;
 export function openPop(
   onClose: () => void,
   inside: () => readonly (HTMLElement | undefined)[],
-  options: { scroll?: boolean; absorb?: boolean; through?: string } = {},
+  options: { scroll?: boolean; absorb?: boolean; follow?: boolean } = {},
 ): () => void {
   closeOpen?.();
   const press = (e: PointerEvent) => {
@@ -28,12 +26,6 @@ export function openPop(
     close();
     // A primary press only: a right-click ends in a menu of the browser's, never in a click.
     if (options.absorb !== true || e.button !== 0) return;
-    if (
-      options.through !== undefined &&
-      e.target instanceof Element &&
-      e.target.closest(options.through)
-    )
-      return;
     absorbClick();
   };
   const key = (e: KeyboardEvent) => {
@@ -42,10 +34,26 @@ export function openPop(
     inside()[0]?.focus();
   };
   // A scroll or resize closes it once its button has moved: not a nudge, such as iOS Safari's
-  // toolbar settling as the pop-up opens.
-  const at = inside()[0]?.getBoundingClientRect();
-  const moved = () => {
+  // toolbar settling as the pop-up opens. With `follow`, a resize (a phone turned) does not: the
+  // pop-up places itself again, and the button's new place, and any scroll the browser makes in
+  // the next two frames to keep the page in range, become where it is measured from.
+  let at = inside()[0]?.getBoundingClientRect();
+  let settling = 0;
+  const moved = (e: Event) => {
     const now = inside()[0]?.getBoundingClientRect();
+    if (options.follow === true && (e.type === "resize" || settling > 0)) {
+      at = now;
+      if (e.type === "resize") {
+        settling++;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            settling--;
+            at = inside()[0]?.getBoundingClientRect();
+          }),
+        );
+      }
+      return;
+    }
     if (at && now && Math.max(Math.abs(now.top - at.top), Math.abs(now.left - at.left)) > 16)
       close();
   };

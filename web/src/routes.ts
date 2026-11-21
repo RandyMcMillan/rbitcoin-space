@@ -4,6 +4,7 @@ import { routes as address } from "./pages/address/routes";
 import { routes as ark } from "./pages/ark/routes";
 import { routes as block } from "./pages/block/routes";
 import { routes as decode } from "./pages/decode/routes";
+import { routes as fees } from "./pages/fees/routes";
 import { routes as blocks } from "./pages/blocks/routes";
 import { routes as home } from "./pages/home/routes";
 import { routes as lightning } from "./pages/lightning/routes";
@@ -12,6 +13,7 @@ import { routes as mining } from "./pages/mining/routes";
 import { routes as notFound } from "./pages/not-found/routes";
 import { routes as projected } from "./pages/projected/routes";
 import { routes as push } from "./pages/push/routes";
+import { routes as timestamp } from "./pages/timestamp/routes";
 import { routes as tx } from "./pages/tx/routes";
 
 /** Every page, on every network: mainnet at the root, the others under their prefix. */
@@ -33,6 +35,8 @@ export const routes: RouteDefinition[] = [
       ...lightning,
       ...ark,
       ...mempool,
+      ...fees,
+      ...timestamp,
       ...notFound,
     ],
   },

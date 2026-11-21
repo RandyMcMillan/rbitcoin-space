@@ -9,6 +9,7 @@ import { onNetwork } from "../../lib/network";
 import { useNetwork } from "../../lib/page";
 import { type Column, DataTable } from "../DataTable";
 import { Link } from "../Link";
+import { chartColumns, chartCsv, csvFileName, saveCsv } from "./csv";
 import {
   areaPath,
   extent,
@@ -60,6 +61,8 @@ export interface ChartSeries {
    * its header ("Capacity, BTC"), so its cells are bare numbers.
    */
   unit?: string;
+  /** The unit of the raw values, for the CSV's header ("sat" where `unit` is "BTC"). */
+  rawUnit?: string;
   /**
    * Its points are samples, the moments something was looked at: each is marked with a dot when
    * they stand {@link MARK_SPACING} px or more apart, so a line between two reads as two looks.
@@ -81,6 +84,8 @@ export interface ChartBand {
   unit?: string;
   /** A shorter name for the figures' header on a phone ("Middle 80%"). */
   narrow?: string;
+  /** The unit of the raw values, for the CSV's header ("sat" where `unit` is "BTC"). */
+  rawUnit?: string;
 }
 
 /**
@@ -117,6 +122,8 @@ export interface ChartNote {
   name: string;
   values: readonly Value[];
   format: (v: number) => string;
+  /** The unit of the raw values, for the CSV's header ("sat" where `unit` is "BTC"). */
+  rawUnit?: string;
 }
 
 export interface ChartProps {
@@ -138,6 +145,8 @@ export interface ChartProps {
   layers?: readonly ChartLayer[];
   /** A layer's value in the readout and the figures. */
   layerFormat?: (v: number) => string;
+  /** The unit of the layers' raw values, for the CSV's header ("share, 0-1"). */
+  layerUnit?: string;
   /** Figures read out after the series, not drawn: a count beside a size. */
   notes?: readonly ChartNote[];
   /**
@@ -500,6 +509,28 @@ export default function Chart(props: ChartProps) {
       rare: l.rare === true,
     })),
   ];
+
+  /**
+   * Each reading's widest figure over the whole chart, laid out unseen under the one shown, so the
+   * readout keeps its lines at every point: an exact amount's length varies, and a line more would
+   * move the plot from under the pointer. Width is reckoned in characters, a group's space as half
+   * of one; a sign is reserved both ways (`signs`), as `+` and `−` are not as wide in every font.
+   */
+  const widest = createMemo(() => {
+    const span = (t: string) => t.length - (t.match(/[ \u202F]/g)?.length ?? 0) / 2;
+    const out = readings(0).map((r) => r.value);
+    for (let i = 1; i < props.x.length; i++) {
+      readings(i).forEach((r, k) => {
+        if (span(r.value) > span(out[k] ?? "")) out[k] = r.value;
+      });
+    }
+    return out;
+  });
+  /** A reserve as its figure breaks (after its point), and with its sign the other way. */
+  const reserve = (t: string) => t.replace(".", ".\u200B");
+  const signs = (t: string) =>
+    /^[+−]/.test(t) ? `${t.startsWith("+") ? "−" : "+"}${t.slice(1)}` : "";
+
   const valueText = () => {
     const i = index();
     return `${when(i)}: ${readings(i)
@@ -514,6 +545,12 @@ export default function Chart(props: ChartProps) {
       ...series().map((s) => describeSeries(s.name, props.x, s.values, s.format)),
       ...bands().map((b) => describeSeries(`${b.name}, upper`, props.x, b.hi, b.format)),
     ].join(" ");
+
+  const download = () =>
+    saveCsv(
+      chartCsv(props.x, chartColumns(props)),
+      csvFileName(props.label, network(), new Date()),
+    );
 
   const pick = (e: PointerEvent) => {
     const f = frame();
@@ -640,7 +677,7 @@ export default function Chart(props: ChartProps) {
         <span class="chart__when num">{when(index())}</span>
         <ul class="chart__values">
           <For keyed={false} each={readings(index())}>
-            {(r) => (
+            {(r, k) => (
               <li
                 class={[
                   "chart__value",
@@ -656,7 +693,16 @@ export default function Chart(props: ChartProps) {
                   <span class={`chart__key chart__key--${r().kind}`} style={r().style} />
                 </Show>
                 <span class="chart__name">{r().short ?? r().name}</span>
-                <span class="chart__figure num">{r().value}</span>
+                {/* Over the reading's widest figure, drawn unseen by CSS so it is in no text. */}
+                <span
+                  class="chart__figure num"
+                  data-widest={reserve(widest()[k] ?? "")}
+                  data-widest-signed={reserve(signs(widest()[k] ?? ""))}
+                >
+                  <span class="chart__now">
+                    <Figure text={r().value} />
+                  </span>
+                </span>
               </li>
             )}
           </For>
@@ -889,6 +935,17 @@ export default function Chart(props: ChartProps) {
         <p id={`${id}-summary`} class="visually-hidden">
           {summary()}
         </p>
+        {/* Floated to the end of the figures' line, so the chart is no taller for it. */}
+        <Show when={props.x.length > 0}>
+          <button
+            type="button"
+            class="chart__csv"
+            aria-label={`Download CSV: ${props.label}`}
+            onClick={download}
+          >
+            Download CSV
+          </button>
+        </Show>
         <details class="chart__figures" onToggle={(e) => setFigures(e.currentTarget.open)}>
           <summary>Show the figures</summary>
           <Show when={figures()}>
@@ -931,4 +988,19 @@ function feeStrip(sy: Scale): { band: number; y: number; h: number }[] {
     const y = sy(b);
     return [{ band: k + 1, y, h: sy(a) - y }];
   });
+}
+
+/**
+ * A reading's figure, free to break after its point where the readout is too narrow for it whole
+ * (an exact amount at a phone's largest text size): never inside a group of its digits.
+ */
+function Figure(props: { text: string }) {
+  const at = () => props.text.indexOf(".");
+  return (
+    <Show when={at() >= 0} fallback={props.text}>
+      {props.text.slice(0, at() + 1)}
+      <wbr />
+      {props.text.slice(at() + 1)}
+    </Show>
+  );
 }

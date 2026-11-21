@@ -6,6 +6,7 @@ import { createEffect, createSignal, For, Match, Show, Switch, untrack } from "s
 import { Amount } from "../../components/Amount";
 import { formatDay } from "../../components/chart/scale";
 import { CopyButton } from "../../components/CopyButton";
+import { QrButton } from "../../components/qr/QrButton";
 import { HashFull } from "../../components/Hash";
 import { Link } from "../../components/Link";
 import { More } from "../../components/More";
@@ -14,7 +15,7 @@ import { SectionHeader } from "../../components/SectionHeader";
 import { Empty, ErrorState, Loading } from "../../components/States";
 import { TimeAgo } from "../../components/Time";
 import { createRequest, isNotFound } from "../../lib/api";
-import { formatBtcShort, groupDigits, MISSING, truncateMiddle } from "../../lib/format";
+import { formatBtc, groupDigits, MISSING, truncateMiddle } from "../../lib/format";
 import { type Network, paths } from "../../lib/network";
 import { useNetwork, usePageTitle } from "../../lib/page";
 import {
@@ -36,6 +37,7 @@ import {
   readView,
   weekAgo,
 } from "./lightning";
+import { CloseRecord } from "./CloseRecord";
 import { ClosedList, OpenList } from "./NodeChannels";
 import { FeeFigures, NodeFees, NodeHistory, RecentChanges } from "./NodeCharts";
 import { ask, Gate, LightningNav, rememberList, SatsFig, Stat, Tag } from "./parts";
@@ -90,6 +92,8 @@ function Node(props: { network: Network; id: string }) {
           title="This server knows no such node"
           text="It holds a node while the node has an open channel it checked against the chain. A node with only private or closed channels, or one that never announced a channel, is not here."
         />
+        {/* A node that left still has the closes this server saw: shown when there are any. */}
+        <CloseRecord network={props.network} id={props.id} gone />
       </Match>
       <Match when={node.state === "errored"}>
         <ErrorState title="Could not load this node" error={node.error} retry={refetch} />
@@ -162,7 +166,10 @@ function Body(props: { node: NodeDetail; network: Network }) {
             <OpenList node={props.node} network={props.network} now={now} />
           </Match>
           <Match when={view() === "closed"}>
-            <ClosedList node={props.node} network={props.network} now={now} />
+            <div class="ln-node-closed">
+              <CloseRecord network={props.network} id={props.node.id} />
+              <ClosedList node={props.node} network={props.network} now={now} />
+            </div>
           </Match>
           <Match when={view() === "fees"}>
             <div class="ln-node-fees">
@@ -219,7 +226,7 @@ function Header(props: { node: NodeDetail }) {
       <p class="ln-node-head__line">
         <span>
           <strong>
-            <Amount sats={props.node.capacity} short />
+            <Amount sats={props.node.capacity} wrap />
           </strong>
           , <span class="muted">{ordinal(props.node.rank.capacity)} by capacity</span>
         </span>
@@ -252,15 +259,13 @@ function Change(props: { now: number; then: number | undefined; format: (n: numb
   );
 }
 
-const btc = (n: number) => `${formatBtcShort(n)} BTC`;
+const btc = (n: number) => `${formatBtc(n)} BTC`;
 
 function Glance(props: { node: NodeDetail; history: HistoryAnswer | undefined; now: number }) {
   const f = () => props.node.figures;
   const c = () => props.node.channels;
   const week = () => (props.history === undefined ? null : weekAgo(props.history, props.now));
   const age = (t: number | null) => (t === null ? MISSING : days(props.now - t));
-  const forced = () =>
-    c().closed === 0 ? null : Math.round(((c().force + c().penalty) / c().closed) * 100);
   return (
     <section aria-labelledby="ln-node-glance-title">
       <SectionHeader title="At a glance" id="ln-node-glance-title">
@@ -271,7 +276,7 @@ function Glance(props: { node: NodeDetail; history: HistoryAnswer | undefined; n
           label="Capacity"
           sub={<Change now={props.node.capacity} then={week()?.capacity} format={btc} />}
         >
-          <Amount sats={props.node.capacity} short />
+          <Amount sats={props.node.capacity} wrap />
         </Stat>
         <Stat
           label="Open channels"
@@ -309,13 +314,12 @@ function Glance(props: { node: NodeDetail; history: HistoryAnswer | undefined; n
         <Stat
           label="Closes seen"
           sub={
-            <Show when={forced() !== null} fallback="None seen">
-              {forced()}% forced
+            <Show when={c().closed > 0} fallback="None seen">
               <span class="ln-node-kinds">
                 <For each={CLOSE_KINDS}>
                   {(k) => (
                     <Show when={c()[k] > 0}>
-                      <Tag icon={KIND_TAG[k].icon} tone={KIND_TAG[k].tone}>
+                      <Tag icon={KIND_TAG[k].icon} tone="muted">
                         <span class="num">{groupDigits(c()[k])}</span> {KIND_SHORT[k].toLowerCase()}
                       </Tag>
                     </Show>
@@ -375,6 +379,7 @@ function Identity(props: { node: NodeDetail }) {
                 <span class="ln-node-connect">
                   <span class="mono ln-node-connect__text">{s()}</span>
                   <CopyButton value={s()} label="Copy the connect string" />
+                  <QrButton value={s()} what="connect string" colour={colour()} />
                 </span>
               )}
             </Show>

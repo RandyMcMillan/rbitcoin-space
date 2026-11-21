@@ -965,6 +965,7 @@ mod tests {
                 fee_rate: None,
                 fee_bands: engine::projected::Bands::default(),
                 miner: engine::blocks::Miner::UNKNOWN,
+                sv2: false,
             },
             txs: vec![0; records].into(),
             ids: Vec::new(),
@@ -1017,6 +1018,9 @@ mod tests {
             msg["summary"]["miner"],
             json!({"name": "Foundry USA", "slug": "foundryusa"})
         );
+        assert_eq!(msg["summary"]["sv2"], false);
+        facts.sv2 = true;
+        assert_eq!(message(&facts, None)["summary"]["sv2"], true);
     }
 
     #[test]

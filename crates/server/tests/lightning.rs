@@ -144,6 +144,7 @@ async fn start(
         ("REGTEST_MEMPOOL_ENABLED", "false".to_owned()),
         ("BACKFILL_ENABLED", "false".to_owned()),
         ("DATA_DIR", dir.display().to_string()),
+        ("MCP_ENABLED", "true".to_owned()),
     ]
     .into_iter()
     .collect();
@@ -181,6 +182,26 @@ impl Reply {
     fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap()
     }
+}
+
+/// A `get_lightning_node` call's answer, as `POST /mcp` gives it.
+async fn lightning_tool(addr: &str, node: &str) -> Value {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "get_lightning_node", "arguments": { "node": node } },
+    })
+    .to_string();
+    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let req = format!(
+        "POST /mcp HTTP/1.1\r\nHost: t\r\nConnection: close\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(req.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await.unwrap();
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let reply: Value = serde_json::from_slice(&raw[split + 4..]).unwrap();
+    reply["result"]["structuredContent"].clone()
 }
 
 async fn get(addr: &str, target: &str) -> Reply {
@@ -794,6 +815,22 @@ async fn nodes_channels_search_and_rankings_answer_exactly_in_both_shapes() {
         assert_eq!(r.json()["error"], "lightning graph is still syncing; retry");
     }
     graph::install(&d.0, &ln.unwrap(), nodes, channels).await;
+
+    // The MCP tool names every field of gossip text it passes on: a node's announced addresses
+    // can be a hostname of its choosing.
+    let node = lightning_tool(&addr, &one).await;
+    assert_eq!(
+        node["sockets"],
+        "3.33.236.230:9735,of7husrflx7sforh3fw6yqlpwstee3wg5imvvmkp4bz6rbjxtg5nljad.onion:9735"
+    );
+    assert_eq!(
+        node["untrusted_text"],
+        serde_json::json!(["alias", "sockets"])
+    );
+    let found = lightning_tool(&addr, "acinq").await;
+    assert_eq!(found["matches"][0]["alias"], "ACINQ", "{found}");
+    assert!(found["matches"][0]["sockets"].is_null(), "{found}");
+    assert_eq!(found["untrusted_text"], serde_json::json!(["alias"]));
 
     // Every route's exact body, as reviewed when recorded.
     let want: serde_json::Map<String, Value> =
@@ -1604,4 +1641,213 @@ async fn a_block_s_channels_are_found_by_its_hash_and_capped() {
         assert_eq!(r.json()["error"], "invalid block hash");
     }
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+/// A node's close record: its stored closes by kind, by peer and with their fees, for a node in
+/// the graph and for one that has left it; no node call, strict about the key.
+#[tokio::test]
+async fn a_node_s_close_record_comes_from_its_stored_closes() {
+    let d = dir("record");
+    let (nodes, channels) = graph::fill(&d.0).await;
+    // Node 5 left the graph: its only channel, with node 1, was force closed.
+    {
+        let store = Store::open(&d.0, "regtest", Options::default()).unwrap();
+        lightning::apply(
+            &store,
+            vec![Change::Closed(
+                graph::sopen(graph::scid(799_700, 4, 0), 5, 1, 600_000, 0),
+                Close {
+                    block: graph::at(800_303, 4),
+                    txid: graph::txid(0x66),
+                    kind: Kind::Force,
+                    fee: Some(2_500),
+                },
+            )],
+        )
+        .await
+        .unwrap();
+        store.close().await;
+    }
+    let (addr, calls, _server, _stop, ln) = start(&d.0, true).await;
+    let ln = ln.unwrap();
+    // The overview waits for an index, and setting one is what wakes it, not its retry five
+    // seconds on: observed through its counters, not a clock.
+    let waits = || async {
+        for _ in 0..1_000 {
+            if ln.overview_wakes().0 > 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the overview never waited for an index");
+    };
+    waits().await;
+    let (_, woken) = ln.overview_wakes();
+    graph::install(&d.0, &ln, nodes, channels).await;
+    for _ in 0..1_000 {
+        if ln.overview_wakes().1 > woken {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        ln.overview_wakes().1,
+        woken + 1,
+        "setting the index did not wake the overview"
+    );
+    let record = |n: u8| {
+        let addr = addr.clone();
+        async move {
+            let key = graph::hex(&graph::key(n));
+            get(&addr, &format!("/regtest/app/lightning/nodes/{key}/closes")).await
+        }
+    };
+
+    let one = record(1).await;
+    assert_eq!(one.status, 200);
+    assert_eq!(one.header("cache-control"), Some("public, max-age=10"));
+    let v = one.json();
+    // The history starts a day after T; every close is later.
+    assert_eq!(v["from"], graph::T + graph::DAY);
+    assert_eq!(v["minimum"], 20);
+    // Every close read: fewer than the cap.
+    assert_eq!(
+        (v["cap"].as_u64(), v["capped"].as_bool()),
+        (Some(10_000), Some(false))
+    );
+    let n = &v["node"];
+    assert_eq!(
+        [
+            &n["closed"],
+            &n["cooperative"],
+            &n["force"],
+            &n["penalty"],
+            &n["other"]
+        ],
+        [3, 0, 1, 1, 1].map(Value::from).each_ref()
+    );
+    // Three closes are not a rate.
+    assert_eq!(n["shares"], Value::Null);
+    assert_eq!(
+        n["fees"],
+        serde_json::json!({
+            "cooperative": { "sum": 0, "known": 0 },
+            "force": { "sum": 2_500, "known": 1 },
+            "penalty": { "sum": 0, "known": 0 },
+            "other": { "sum": 1_000, "known": 1 },
+        })
+    );
+    let weeks = n["weeks"].as_array().unwrap();
+    let summed: u64 = weeks
+        .iter()
+        .map(|w| {
+            ["cooperative", "force", "penalty", "other"]
+                .iter()
+                .map(|k| w[k].as_u64().unwrap())
+                .sum::<u64>()
+        })
+        .sum();
+    assert_eq!(summed, 3, "each close in one week");
+    assert!(weeks.windows(2).all(|w| w[1]["time"].as_u64().unwrap()
+        - w[0]["time"].as_u64().unwrap()
+        == 7 * graph::DAY));
+    // Its peers with a commitment close: 3 (a breach, one channel still open with it) and 5,
+    // gone from the graph (no alias, nothing open); 2 had only a close by neither protocol.
+    let p = &v["peers"];
+    assert_eq!(
+        (
+            p["count"].as_u64(),
+            p["forced"].as_u64(),
+            p["more"].as_u64()
+        ),
+        (Some(3), Some(2), Some(0))
+    );
+    let list = p["list"].as_array().unwrap();
+    assert_eq!(list.len(), 2);
+    let three = list
+        .iter()
+        .find(|r| r["id"] == graph::hex(&graph::key(3)))
+        .unwrap();
+    assert_eq!(
+        (
+            three["penalty"].as_u64(),
+            three["closed"].as_u64(),
+            three["open"].as_u64()
+        ),
+        (Some(1), Some(1), Some(1))
+    );
+    assert_eq!(
+        (&three["alias"], &three["shares"]),
+        (&Value::Null, &Value::Null)
+    );
+    let five = list
+        .iter()
+        .find(|r| r["id"] == graph::hex(&graph::key(5)))
+        .unwrap();
+    assert_eq!(
+        (five["force"].as_u64(), five["open"].as_u64()),
+        (Some(1), Some(0))
+    );
+    // Whether each other end is in the graph, for a page to link it or not.
+    assert_eq!(
+        (three["held"].as_bool(), five["held"].as_bool()),
+        (Some(true), Some(false))
+    );
+
+    // Node 5 is not in the graph, but its close is stored: its record still answers.
+    let gone = record(5).await;
+    assert_eq!(gone.status, 200);
+    let g = gone.json();
+    assert_eq!(
+        (g["node"]["closed"].as_u64(), g["node"]["force"].as_u64()),
+        (Some(1), Some(1))
+    );
+    assert_eq!(g["peers"]["list"][0]["id"], graph::hex(&graph::key(1)));
+    assert_eq!(g["peers"]["list"][0]["alias"], "ACINQ");
+    // Node 4 is in the graph with no close: an empty record, not a refusal.
+    let none = record(4).await.json();
+    assert_eq!(
+        (
+            none["node"]["closed"].as_u64(),
+            none["peers"]["count"].as_u64()
+        ),
+        (Some(0), Some(0))
+    );
+    // The network's figures come with the overview's computation, each channel once.
+    for _ in 0..1_000 {
+        if !record(1).await.json()["network"].is_null() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let net = record(1).await.json()["network"].clone();
+    assert_eq!(
+        [
+            &net["closed"],
+            &net["cooperative"],
+            &net["force"],
+            &net["penalty"],
+            &net["other"]
+        ],
+        [4, 1, 1, 1, 1].map(Value::from).each_ref(),
+        "{net}"
+    );
+    assert_eq!(
+        net["fees"]["cooperative"],
+        serde_json::json!({ "sum": 300, "known": 1 })
+    );
+
+    // A node never seen, a malformed key, and the route takes no parameters that change it.
+    let unknown = record(9).await;
+    assert_eq!(
+        (unknown.status, unknown.json()["error"].as_str()),
+        (404, Some("node not found"))
+    );
+    let bad = get(&addr, "/regtest/app/lightning/nodes/03zz/closes").await;
+    assert_eq!(bad.status, 400);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "the record called the node"
+    );
 }

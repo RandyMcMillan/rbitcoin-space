@@ -686,19 +686,27 @@ export const CLOSE_WORDS: Record<CloseKind, { name: string; sure: string; why: s
   force: {
     name: "Force close",
     sure: "Certain",
-    why: "The closing transaction is a commitment transaction, which only one end broadcasting the channel's latest state on its own produces. The chain does not say which end closed it or why.",
+    why: "The closing transaction is a commitment transaction: one end broadcast a state of the channel on its own. The chain does not say which end, or why. Had that state been revoked, the close reads as a penalty once a sweep of it with the revocation key is seen.",
   },
   penalty: {
     name: "Penalty",
     sure: "Certain",
-    why: "One end broadcast an old, revoked state of the channel, and the other end swept its outputs with the revocation key, which only the cheated end holds.",
+    why: "The closing commitment was a revoked state of the channel: one of its outputs was swept with that state's revocation key, and this server saw the sweep. The chain does not say which end broadcast the commitment.",
   },
+
   other: {
     name: "Other",
     sure: "Certain it is not a plain close",
     why: "The transaction spends other coins besides the channel's funds, which no closing transaction does: most likely a splice that added funds. The channel id ends here all the same.",
   },
 };
+
+/**
+ * The words for one closed channel: a penalty's once its revocation sweep is recorded, whatever
+ * kind its closing transaction itself shows (a breach keeps "force" with the sweep beside it).
+ */
+export const closeWords = (c: { closed: Close; penalty?: Sweep | null }) =>
+  CLOSE_WORDS[c.penalty ? "penalty" : c.closed.kind];
 
 /** A close kind as one word for a list. */
 export const KIND_SHORT: Record<CloseKind, string> = {
@@ -734,13 +742,6 @@ export const btcAxis = (sats: number): string => {
 
 /** Millisatoshis: `1 000 msat`. */
 export const msat = (n: number): string => `${groupDigits(n)} msat`;
-
-/**
- * Millisatoshis as a program reads them: digits only, no grouping or unit. The same decimal digits
- * `msat` shows, past 2^53 too (a BigInt there gave the binary value's digits, not the shown ones).
- */
-export const plainMsat = (n: number): string =>
-  Number.isFinite(n) ? Math.round(n).toString() : MISSING;
 
 /** A channel id as the API writes it: `811984x2037x0`; or the 64-bit one in decimal. */
 export function isChannelId(v: string): boolean {
@@ -889,20 +890,15 @@ export function feeRows(fees: NodeDetail["fees"]): FeeRow[] {
 const group = (digits: string): string => digits.replaceAll(/\B(?=(\d{3})+(?!\d))/g, NNBSP);
 
 /**
- * Millisatoshis as an operator reads a policy: under a bitcoin, as sats exact to the msat (`1 sat`,
- * `500 msat` under a sat, `1.001 sats`, `20 000 000 sats`); from one, in magnitude like any
- * summary (`5.00 BTC`, `21 000 000 BTC`), which fits a phone at any text size, the exact msat
- * a press away (`Msat`). A bigint for a fee past 2⁵³.
+ * Millisatoshis as an operator reads a policy, as sats exact to the msat at any size (`1 sat`,
+ * `500 msat` under a sat, `1.001 sats`, `500 000 000 sats`): never rounded, as a term is what a
+ * node enforces. A bigint for a fee past 2⁵³.
  */
-export function msatAsSats(n: number | bigint, btcFrom = 100_000_000_000n): string {
+export function msatAsSats(n: number | bigint): string {
   if (typeof n === "number" && !Number.isFinite(n)) return MISSING;
   const big = typeof n === "bigint" ? n : BigInt(Math.round(n));
   const sign = big < 0n ? "−" : "";
   const m = big < 0n ? -big : big;
-  if (m >= btcFrom) {
-    const btc = m / 100_000_000_000n;
-    return `${sign}${btc >= 1000n ? group(String(btc)) : formatBtcShort(Number(m / 1000n))} BTC`;
-  }
   if (m > 0n && m < 1000n) return `${sign}${group(String(m))} msat`;
   const frac = String(m % 1000n)
     .padStart(3, "0")
@@ -911,19 +907,30 @@ export function msatAsSats(n: number | bigint, btcFrom = 100_000_000_000n): stri
   return `${sign}${whole}${frac === "" ? "" : `.${frac}`} ${m === 1000n ? "sat" : "sats"}`;
 }
 
-/** The same figure in magnitude from a sat (`0.200 BTC`, `0.0100 BTC`), for a very narrow room. */
-export const msatAsBtc = (n: number | bigint): string => msatAsSats(n, 1000n);
+/**
+ * The same figure in magnitude from a sat (`0.200 BTC`, `21 000 000 BTC`), for a list's narrowest
+ * room (the live feed): under a sat it is the exact msat.
+ */
+export function msatAsBtc(n: number | bigint): string {
+  if (typeof n === "number" && !Number.isFinite(n)) return MISSING;
+  const big = typeof n === "bigint" ? n : BigInt(Math.round(n));
+  const m = big < 0n ? -big : big;
+  if (m < 1000n) return msatAsSats(big);
+  const sign = big < 0n ? "−" : "";
+  const btc = m / 100_000_000_000n;
+  return `${sign}${btc >= 1000n ? group(String(btc)) : formatBtcShort(Number(m / 1000n))} BTC`;
+}
 
 /**
- * Characters past which an msat figure also carries its magnitude, shown in its place where the
- * room is narrowest (a phone at a large text size, `MsatFig`): there no longer figure fits whole.
+ * Characters past which an msat figure also carries its magnitude (`MsatFig`), and a fee history
+ * reads as a labelled list: where a room is narrowest no longer figure fits on one line.
  */
 export const LONG_FIGURE = 12;
 
 /**
  * Characters past which a figure is too long even for a room that holds an ordinary long one
- * (`500 000 000 sats` is 16): the node page's cards and glance show these in magnitude by their
- * own width, so their ordinary figures stay exact.
+ * (`500 000 000 sats` is 16): the node page's cards and glance, and the live feed, show these in
+ * magnitude by their own width, so their ordinary figures stay exact.
  */
 export const LONGER_FIGURE = 16;
 
@@ -1497,4 +1504,202 @@ export function baseShort(msatValue: number): string {
   const m = Math.round(msatValue);
   if (m > 0 && m < 1000) return msat(m);
   return msatAsSats(m).replace(/ sats?$/, "");
+}
+
+// A node's close record (`/app/lightning/nodes/:key/closes`): how its channels this server watched
+// ended, by kind, week and peer, beside every channel's as last worked out.
+
+export type ByKind = Record<CloseKind, number>;
+
+export interface RecordTally extends ByKind {
+  closed: number;
+  /** Each kind's share of `closed` in percent to one decimal; null below the answer's `minimum`. */
+  shares: ByKind | null;
+  /** The closing transactions' fees, sats, over the closes whose fee is known. */
+  fees: Record<CloseKind, { sum: number; known: number }>;
+  /** Monday 00:00 UTC of each week from the record's start, oldest first. */
+  weeks: (ByKind & { time: number })[];
+}
+
+export interface RecordPeer extends ByKind {
+  id: string;
+  alias: string | null;
+  closed: number;
+  shares: ByKind | null;
+  /** The node's channels with this peer open now. */
+  open: number;
+  /** Whether the graph holds this peer: it has a page. */
+  held: boolean;
+}
+
+export interface NodeCloses {
+  id: string;
+  /** When the record starts; null before this server's history has. */
+  from: number | null;
+  time: number;
+  /** The fewest closes a share is given for. */
+  minimum: number;
+  /** The most closes a record reads, its newest; `capped` when the node has more. */
+  cap: number;
+  capped: boolean;
+  node: RecordTally;
+  /** `list`: the peers it had a force close or penalty with, most first; `more` left out. */
+  peers: { count: number; forced: number; list: RecordPeer[]; more: number };
+  /** Every stored channel's record, each close once; null until the server first works it out. */
+  network: (RecordTally & { time: number }) | null;
+}
+
+/** Each kind a count of zero or more: not a type guard, so the object stays an `Obj` to check on. */
+const kindCounts = (v: Obj): boolean => CLOSE_KINDS.every((k) => num(v[k]) && v[k] >= 0);
+const isByKind = (v: unknown): v is ByKind => obj(v) && kindCounts(v);
+
+const isWeek = (w: unknown): w is ByKind & { time: number } =>
+  obj(w) && kindCounts(w) && num(w["time"]);
+
+const isTally = (v: unknown): v is RecordTally => {
+  if (!obj(v) || !kindCounts(v) || !obj(v["fees"])) return false;
+  const fees = v["fees"];
+  return (
+    num(v["closed"]) &&
+    nullable(v["shares"], isByKind) &&
+    CLOSE_KINDS.every((k) => {
+      const f = fees[k];
+      return obj(f) && num(f["sum"]) && num(f["known"]);
+    }) &&
+    list(v["weeks"], isWeek)
+  );
+};
+
+const isRecordPeer = (v: unknown): v is RecordPeer =>
+  obj(v) &&
+  kindCounts(v) &&
+  str(v["id"]) &&
+  nullable(v["alias"], str) &&
+  num(v["closed"]) &&
+  num(v["open"]) &&
+  typeof v["held"] === "boolean" &&
+  nullable(v["shares"], isByKind);
+
+export const isNodeCloses = (v: unknown): v is NodeCloses => {
+  if (!obj(v) || !obj(v["peers"])) return false;
+  const p = v["peers"];
+  const n = v["network"];
+  return (
+    str(v["id"]) &&
+    nullable(v["from"], num) &&
+    num(v["time"]) &&
+    num(v["minimum"]) &&
+    num(v["cap"]) &&
+    typeof v["capped"] === "boolean" &&
+    isTally(v["node"]) &&
+    num(p["count"]) &&
+    num(p["forced"]) &&
+    num(p["more"]) &&
+    list(p["list"], isRecordPeer) &&
+    (n === null || (obj(n) && num(n["time"]) && isTally(n)))
+  );
+};
+
+/**
+ * Each kind in a node's record, in a few words: what the chain shows, never who did it. The words
+ * of docs/LIGHTNING.md "How a close is classified", as `CLOSE_WORDS` gives them in full.
+ */
+export const RECORD_WORDS: Record<CloseKind, string> = {
+  cooperative: "Likely a mutual close; a splice that took funds out looks the same",
+  force: "One end broadcast a commitment transaction; the chain does not say which end",
+  penalty: "A revoked state was broadcast and swept; the record does not say by which end",
+  other: "Not a close by either protocol: most likely a splice that added funds",
+};
+
+/** A share as the record writes it: whole percent, one decimal under 10, "under 0.1%" above none, "0%" for none. */
+export function shareText(percent: number, closes: number): string {
+  if (closes === 0) return "0%";
+  if (percent < 0.1) return "under 0.1%";
+  // Near 100 a whole number would round a close away: 402 of 403 is not all of them.
+  return percent < 10 || (percent > 99 && percent < 100)
+    ? `${percent.toFixed(1)}%`
+    : `${Math.round(percent)}%`;
+}
+
+/** Kinds worth a row or column: every kind with a close in either record, cooperative and force always. */
+export function kindsIn(...tallies: (ByKind | null)[]): CloseKind[] {
+  return CLOSE_KINDS.filter(
+    (k) => k === "cooperative" || k === "force" || tallies.some((t) => t !== null && t[k] > 0),
+  );
+}
+
+/** Fees of one kind per close, rounded to the sat; null with no fee known. */
+export const perClose = (f: { sum: number; known: number }): number | null =>
+  f.known === 0 ? null : Math.round(f.sum / f.known);
+
+export interface WeekRow extends ByKind {
+  /** The week's Monday, or null for the weeks before those shown, summed. */
+  time: number | null;
+  closed: number;
+  /** Every channel's closes that week and how many were force closes or penalties. */
+  network: { closed: number; forced: number } | null;
+}
+
+const sum = (k: ByKind): number => CLOSE_KINDS.reduce((a, x) => a + k[x], 0);
+
+/**
+ * The newest `keep` weeks, newest first, and the weeks before them summed as one row (`time`
+ * null) when there are any. The network's week is matched by its Monday.
+ */
+export function weekRows(
+  weeks: readonly (ByKind & { time: number })[],
+  network: readonly (ByKind & { time: number })[] | null,
+  keep = 8,
+): WeekRow[] {
+  const net = new Map(network?.map((w) => [w.time, w]));
+  const row = (k: ByKind, time: number | null, n: ByKind | null): WeekRow => ({
+    time,
+    cooperative: k.cooperative,
+    force: k.force,
+    penalty: k.penalty,
+    other: k.other,
+    closed: sum(k),
+    network: n === null ? null : { closed: sum(n), forced: n.force + n.penalty },
+  });
+  const newest = [...weeks];
+  newest.reverse();
+  const shown = newest.slice(0, keep).map((w) => row(w, w.time, net.get(w.time) ?? null));
+  const earlier = newest.slice(keep);
+  if (earlier.length === 0) return shown;
+  const add = (ws: readonly ByKind[]): ByKind => ({
+    cooperative: ws.reduce((a, w) => a + w.cooperative, 0),
+    force: ws.reduce((a, w) => a + w.force, 0),
+    penalty: ws.reduce((a, w) => a + w.penalty, 0),
+    other: ws.reduce((a, w) => a + w.other, 0),
+  });
+  // Every channel's figure for those weeks only when it has all of them: a part would read as all.
+  const netEarlier = earlier.map((w) => net.get(w.time));
+  const whole = netEarlier.every((w) => w !== undefined);
+  return [
+    ...shown,
+    row(add(earlier), null, whole ? add(netEarlier.filter((w) => w !== undefined)) : null),
+  ];
+}
+
+/**
+ * The force closes and penalties of its channels, in one sentence: how many, on channels with how
+ * many peers, and the most with any one. Never who closed: the chain does not say.
+ */
+export function peersInWords(r: NodeCloses): string {
+  const forced = r.node.force + r.node.penalty;
+  if (forced === 0) return "None of its channels ended in a force close or a penalty.";
+  const what =
+    r.node.penalty === 0
+      ? count(r.node.force, "force close")
+      : r.node.force === 0
+        ? count(r.node.penalty, "penalty", "penalties")
+        : `${count(r.node.force, "force close")} and ${count(r.node.penalty, "penalty", "penalties")}`;
+  const peers = r.peers.forced;
+  const top = r.peers.list[0];
+  const most = top === undefined ? 0 : top.force + top.penalty;
+  // A close whose two ends are the node itself lists no peer: then nothing is said of peers.
+  if (r.peers.list.length === 0) return `The record holds ${what}.`;
+  if (forced === 1) return `The ${what} was on a channel with the peer below.`;
+  if (peers === 1) return `The ${what} were all on channels with one peer.`;
+  return `The ${what} were on channels with ${groupDigits(peers)} different peers, at most ${groupDigits(most)} with any one.`;
 }

@@ -1,4 +1,4 @@
-import { useParams } from "@solidjs/router";
+import { useParams, useSearchParams } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
@@ -11,6 +11,7 @@ import {
   untrack,
 } from "solid-js";
 import { HashFull } from "../../components/Hash";
+import { QrButton } from "../../components/qr/QrButton";
 import { busyRetrying, createApi, createRequest, fetchApp } from "../../lib/api";
 import { fetchConfig } from "../../lib/config";
 import { type LiveStatus, useLiveStatus, useTopic } from "../../lib/live";
@@ -26,7 +27,10 @@ import { History } from "./History";
 import { LargeAddress } from "./Large";
 import { asksAgain, LEDGER_POLL_MS, readLedger, waiting } from "./ledger";
 import { AddingUp, KeptAddress } from "./Kept";
+import { readAt } from "./asof";
+import { createLookalikes } from "./LookalikeNotice";
 import { Notice, settled } from "./parts";
+import { AsOfForm, PinnedBody } from "./Pinned";
 import { SilentPaymentAddress } from "./SilentPayment";
 import { Totals } from "./Totals";
 import "./AddressPage.css";
@@ -74,13 +78,27 @@ export default function AddressPage() {
     const f = found();
     return f?.networks.includes(network()) ? `${network()} ${f.address}` : undefined;
   };
-  usePageTitle(() => `Address ${truncateMiddle(found()?.address ?? input())}`);
+  // A key has no address: the page is the key's, and says so.
+  const isKey = () => found()?.type === "p2pk";
+  // `?at=<height>`: the page as of that block (Pinned.tsx), made afresh for each block asked.
+  const [search] = useSearchParams<{ at: string }>();
+  const at = createMemo(() => readAt(search.at));
+  const pinnedKey = () => {
+    const k = key();
+    return k !== undefined && at().kind !== "now" ? `${k} ${search.at ?? ""}` : undefined;
+  };
+  // The block field, opened from the header while the page is live.
+  const [picking, setPicking] = createSignal(false);
+  const canPin = () => key() !== undefined && found()?.type !== "sp" && at().kind === "now";
+  usePageTitle(
+    () => `${isKey() ? "Public key" : "Address"} ${truncateMiddle(found()?.address ?? input())}`,
+  );
 
   return (
     <div class="wrap address">
       <header class="address-head">
         <div class="address-head__row">
-          <h1>Address</h1>
+          <h1>{isKey() ? "Public key" : "Address"}</h1>
           <Show when={found()}>
             {(f) => (
               <span class="address-type" title={TYPE_NAMES[f().type].long}>
@@ -88,9 +106,42 @@ export default function AddressPage() {
               </span>
             )}
           </Show>
+          <Show when={canPin()}>
+            <button
+              class="btn address-asof-open"
+              type="button"
+              aria-expanded={picking() ? "true" : "false"}
+              aria-controls="address-asof-pick"
+              onClick={() => setPicking((p) => !p)}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="8" cy="8" r="6.25" />
+                <path d="M8 4.5V8l2.5 1.5" />
+              </svg>
+              As of a block
+            </button>
+          </Show>
         </div>
         <Show when={found()} fallback={<p class="address-head__raw">{input()}</p>}>
-          {(f) => <HashFull value={f().address} copyLabel="Copy address" />}
+          {(f) => (
+            <HashFull value={f().address} copyLabel={isKey() ? "Copy public key" : "Copy address"}>
+              {/* No code for a key: a wallet that scans one cannot pay it. */}
+              <Show when={!isKey()}>
+                <QrButton value={f().address} what="address" />
+              </Show>
+            </HashFull>
+          )}
+        </Show>
+        <Show when={canPin()}>
+          <div id="address-asof-pick" class="address-asof-pick" hidden={!picking()}>
+            <Show when={picking()}>
+              <p class="address-asof-pick__lead">
+                See this {isKey() ? "key" : "address"} as it stood at a past block: its balance,
+                coins and history then.
+              </p>
+              <AsOfForm id="address-asof-at-now" page={key() ?? ""} />
+            </Show>
+          </div>
         </Show>
       </header>
       <Switch>
@@ -103,6 +154,15 @@ export default function AddressPage() {
         {/* Read from the address alone: nothing is asked of the server for it. */}
         <Match when={found()?.type === "sp"}>
           <SilentPaymentAddress address={(found() as Recognised).address} network={network()} />
+        </Match>
+        <Match when={pinnedKey()} keyed>
+          {(k) => (
+            <PinnedBody
+              address={k.split(" ")[1] ?? ""}
+              isKey={found()?.type === "p2pk"}
+              at={untrack(at)}
+            />
+          )}
         </Match>
         <Match when={key()} keyed>
           {(k) => <AddressBody address={k.slice(k.indexOf(" ") + 1)} found={found()} />}
@@ -196,6 +256,12 @@ function AddressBody(props: { address: string; found: Recognised | null }) {
       (whole() ? `${path}/txs/chain` : !kept() && !large() && `${path}/txs`),
     { fresh: true },
   );
+  // As an address becomes a kept one, the mixed list it had is still showing until the kept list
+  // answers: confirmed only by the rows themselves too.
+  const { onShown, lookalike, notice, announced } = createLookalikes(
+    address,
+    (shown) => whole() && shown.every((t) => t.status.confirmed),
+  );
   let refreshHistory = () => {
     // Replaced by History once it mounts.
   };
@@ -280,86 +346,103 @@ function AddressBody(props: { address: string; found: Recognised | null }) {
   });
 
   return (
-    <Switch>
-      <Match when={pageRefusal() === "no-index"}>
-        <Notice title="This server does not index addresses" tone="caution">
-          Its node runs without an address index, so it cannot show the balance or history of any
-          address. This says nothing about this address or its funds: look it up with another
-          explorer or your own node.
-        </Notice>
-      </Match>
-      <Match when={pageRefusal() === "invalid"}>
-        <Malformed network={network()} />
-      </Match>
-      <Match when={pageRefusal() === "wrong-network" && props.found}>
-        {(f) => <WrongNetwork found={f()} network={network()} />}
-      </Match>
-      {/* An address the server keeps its own totals for: they come at once. */}
-      <Match when={kept()}>
-        {(k) => (
-          <>
-            <LiveLine watch={watch()} socket={socket()} />
-            <KeptAddress
-              address={props.address}
-              ledger={k()}
-              stats={stats}
-              retry={retryAll}
-              whole={
-                <History
-                  address={props.address}
-                  stats={stats}
-                  first={first}
-                  retryFirst={() => refetchFirst()}
-                  onRefresh={(fn) => {
-                    refreshHistory = fn;
-                  }}
-                  kept
-                />
-              }
-            />
-          </>
-        )}
-      </Match>
-      {/* What the node says about an address above its cap, its unconfirmed transactions, and
-          whether the server is adding it up. */}
-      <Match when={large()}>
-        <LargeAddress
-          address={props.address}
-          note={
-            waiting(ledger()) || ledger().state === "failed" ? (
-              <AddingUp ledger={ledger()} />
-            ) : undefined
-          }
-        />
-      </Match>
-      <Match when={true}>
-        <LiveLine watch={watch()} socket={socket()} />
-        <Show when={busyRetrying()}>
-          <p class="address-busy" role="status">
-            The server is busy for a moment, so this page is waiting to ask again.
-          </p>
-        </Show>
-        <Totals stats={stats} retry={retryAll} />
-        <BalanceChart
-          address={props.address}
-          stats={stats}
-          after={first.state !== "unresolved" && first.state !== "pending"}
-          onRefresh={(fn) => {
-            refreshBalance = fn;
-          }}
-        />
-        <History
-          address={props.address}
-          held={!ledgerAnswered()}
-          stats={stats}
-          first={first}
-          retryFirst={() => refetchFirst()}
-          onRefresh={(fn) => {
-            refreshHistory = fn;
-          }}
-        />
-      </Match>
-    </Switch>
+    <>
+      {/* Present from the start, so the one announcement it makes is heard. */}
+      <p class="visually-hidden address-announce" aria-live="polite">
+        {announced()}
+      </p>
+      <Switch>
+        <Match when={pageRefusal() === "no-index"}>
+          <Notice title="This server does not index addresses" tone="caution">
+            Its node runs without an address index, so it cannot show the balance or history of any
+            address. This says nothing about this address or its funds: look it up with another
+            explorer or your own node.
+          </Notice>
+        </Match>
+        <Match when={pageRefusal() === "invalid"}>
+          <Show when={props.found?.type === "p2pk"} fallback={<Malformed network={network()} />}>
+            <Notice title="This is not a valid public key" tone="caution">
+              It has a key's length and first digits, but it is not a point on Bitcoin's curve.
+              Check it for a mistyped character.
+            </Notice>
+          </Show>
+        </Match>
+        <Match when={pageRefusal() === "wrong-network" && props.found}>
+          {(f) => <WrongNetwork found={f()} network={network()} />}
+        </Match>
+        {/* An address the server keeps its own totals for: they come at once. */}
+        <Match when={kept()}>
+          {(k) => (
+            <>
+              <LiveLine watch={watch()} socket={socket()} />
+              {notice()}
+              <KeptAddress
+                address={props.address}
+                ledger={k()}
+                stats={stats}
+                retry={retryAll}
+                whole={
+                  <History
+                    address={props.address}
+                    stats={stats}
+                    first={first}
+                    retryFirst={() => refetchFirst()}
+                    onRefresh={(fn) => {
+                      refreshHistory = fn;
+                    }}
+                    kept
+                    lookalike={lookalike()}
+                    onShown={onShown}
+                  />
+                }
+              />
+            </>
+          )}
+        </Match>
+        {/* What the node says about an address above its cap, its unconfirmed transactions, and
+            whether the server is adding it up. */}
+        <Match when={large()}>
+          <LargeAddress
+            address={props.address}
+            note={
+              waiting(ledger()) || ledger().state === "failed" ? (
+                <AddingUp ledger={ledger()} />
+              ) : undefined
+            }
+          />
+        </Match>
+        <Match when={true}>
+          <LiveLine watch={watch()} socket={socket()} />
+          <Show when={busyRetrying()}>
+            <p class="address-busy" role="status">
+              The server is busy for a moment, so this page is waiting to ask again.
+            </p>
+          </Show>
+          {notice()}
+          <Totals stats={stats} retry={retryAll} />
+          <BalanceChart
+            address={props.address}
+            stats={stats}
+            after={first.state !== "unresolved" && first.state !== "pending"}
+            onRefresh={(fn) => {
+              refreshBalance = fn;
+            }}
+          />
+          <History
+            address={props.address}
+            held={!ledgerAnswered()}
+            stats={stats}
+            first={first}
+            retryFirst={() => refetchFirst()}
+            onRefresh={(fn) => {
+              refreshHistory = fn;
+            }}
+            lookalike={lookalike()}
+            onShown={onShown}
+          />
+        </Match>
+      </Switch>
+    </>
   );
 }
 

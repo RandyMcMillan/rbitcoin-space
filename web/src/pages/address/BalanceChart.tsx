@@ -14,7 +14,7 @@ import { formatMoment } from "../../components/chart/scale";
 import { Loading, ErrorState } from "../../components/States";
 import { type ApiResource, fetchStamped, type Stamped } from "../../lib/api";
 import type { AddressStats } from "../../lib/esplora";
-import { formatBtc, groupDigits } from "../../lib/format";
+import { formatBtc, formatBtcScale, groupDigits } from "../../lib/format";
 import { useNetwork } from "../../lib/page";
 import { refusal } from "./address";
 import { advance, type History, loadHistory, points, readRows } from "./balance";
@@ -34,7 +34,7 @@ const FOLLOW_TRIES = 3;
 const HEIGHT = 200;
 
 /** BTC without the zeros a round tick does not need: `0.5`, `1 200`. */
-const btcTick = (sats: number) => formatBtc(Math.round(sats)).replace(/\.?0+$/, "");
+const btcTick = (sats: number) => formatBtcScale(Math.round(sats));
 const btc = (sats: number) => `${formatBtc(sats)} BTC`;
 const signedBtc = (sats: number) => `${sats > 0 ? "+" : ""}${btc(sats)}`;
 const plural = (n: number, one: string, many: string) =>
@@ -57,9 +57,18 @@ export function BalanceChart(props: {
   after: boolean;
   /** Hands the page a function that brings the chart up to date after a change. */
   onRefresh: (refresh: () => void) => void;
+  /**
+   * The block the page shows the address as of: every page is pinned to it, and the line ends at
+   * its time rather than now. The page then never asks for a refresh.
+   */
+  asof?: { hash: string; time: number };
+  /** Told when a pinned read finds its block no longer on the best chain (a 404). */
+  onGone?: () => void;
 }) {
   const network = useNetwork();
   const base = `/address/${encodeURIComponent(untrack(() => props.address))}`;
+  // Fixed for the chart's life: the page is made afresh for each block.
+  const asof = untrack(() => props.asof);
   const [shown, setShown] = createSignal<Shown>({ kind: "loading" });
   const controller = new AbortController();
   onCleanup(() => controller.abort());
@@ -83,7 +92,10 @@ export function BalanceChart(props: {
    */
   const update = async () => {
     const old = history;
-    if (old === undefined) return loadHistory(base, fetch);
+    // A pinned history never changes: asked again only after a failure, and whole.
+    if (old === undefined || asof !== undefined) {
+      return loadHistory(base, fetch, undefined, undefined, asof?.hash);
+    }
     const first = await fetch(`${base}/txs/summary`);
     return advance(old, readRows(first.value)) ?? loadHistory(base, fetch, 1, first);
   };
@@ -92,9 +104,10 @@ export function BalanceChart(props: {
     busy = true;
     try {
       history = await update();
-      setShown({ kind: "ready", history, now: Math.floor(Date.now() / 1000) });
+      setShown({ kind: "ready", history, now: asof?.time ?? Math.floor(Date.now() / 1000) });
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (asof !== undefined && refusal(error) === "gone") props.onGone?.();
       setShown({ kind: "failed", error });
     }
     busy = false;
@@ -117,6 +130,8 @@ export function BalanceChart(props: {
   /** While the chart and the totals disagree on the confirmed count, asks again ({@link FOLLOW_MS}). */
   const follow = () => {
     clearTimeout(behindTimer);
+    // Pinned answers are as of one block: nothing to catch up with.
+    if (asof !== undefined) return;
     const n = untrack(count);
     if (history === undefined || n === undefined || n === history.total) {
       behind = 0;
@@ -213,6 +228,7 @@ export function BalanceChart(props: {
                           draw: "step",
                           until: v().end,
                           format: btc,
+                          rawUnit: "sat",
                         },
                       ]}
                       notes={[
@@ -221,7 +237,12 @@ export function BalanceChart(props: {
                           values: v().pts.map((p) => p.height),
                           format: groupDigits,
                         },
-                        { name: "Change", values: v().pts.map((p) => p.change), format: signedBtc },
+                        {
+                          name: "Change",
+                          values: v().pts.map((p) => p.change),
+                          format: signedBtc,
+                          rawUnit: "sat",
+                        },
                       ]}
                       time={formatMoment}
                     />

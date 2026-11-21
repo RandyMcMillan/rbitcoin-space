@@ -1,7 +1,6 @@
 // The accessibility pass (docs/FRONTEND.md "Accessibility"): every page type under axe-core, a
 // keyboard walk, reduced motion, and the shell and a dense page at a large text size.
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import type { Page } from "@playwright/test";
 import {
   ARKADE_ADDRESS,
@@ -15,62 +14,17 @@ import {
   withBarkHex,
   withBoth,
 } from "./ark-answers";
+import { axe } from "./axe";
 import { chain, expect, stubRetargets, test } from "./fixtures";
 import { KEPT, LARGE, stubLarge } from "./large-address";
 import { ACINQ, mainnet, penalties, serve } from "./lightning-answers";
+import { serveScore } from "./score-answers";
 
-// axe-core is a development dependency only: read from node_modules and run in the page through
-// Playwright, never bundled or served.
 const REPLACEMENTS = (
   JSON.parse(
     readFileSync(new URL("../../fixtures/api-v1/replacements.json", import.meta.url), "utf8"),
   ) as { all: unknown }
 ).all;
-const AXE = readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
-
-/** WCAG 2.0 to 2.2, A and AA, and axe's best practices. */
-const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"];
-const OFF = {
-  // A tile's name starts with the title in sight ("Block 110", "Next block"), as WCAG 2.5.3 asks;
-  // the rule wants every figure drawn in the tile in its name, in the order drawn.
-  "label-content-name-mismatch": { enabled: false },
-};
-
-interface Violation {
-  id: string;
-  nodes: { target: string[]; failureSummary?: string }[];
-}
-
-/** axe-core's violations on the page as it is now, one line each. */
-async function axe(page: Page, only?: string[]): Promise<string[]> {
-  // Fades still under way (they remain under reduced motion) would be measured half done.
-  await page.evaluate(() =>
-    Promise.all(
-      document
-        .getAnimations()
-        .filter((a) => a.effect?.getComputedTiming().endTime !== Infinity)
-        .map((a) => a.finished.catch(() => undefined)),
-    ),
-  );
-  await page.evaluate(AXE);
-  const found = await page.evaluate(
-    async ({ tags, rules, only: ids }) => {
-      const run = (window as unknown as { axe: { run: (...a: unknown[]) => Promise<unknown> } }).axe
-        .run;
-      const r = (await run(document, {
-        runOnly: ids ? { type: "rule", values: ids } : { type: "tag", values: tags },
-        rules: ids ? {} : rules,
-        resultTypes: ["violations"],
-      })) as { violations: Violation[] };
-      return r.violations;
-    },
-    { tags: TAGS, rules: OFF, only },
-  );
-  return found.flatMap((v) =>
-    v.nodes.map((n) => `${v.id} at ${n.target.join(" ")}: ${n.failureSummary ?? ""}`),
-  );
-}
-
 interface Stop {
   /** The element's own number, so a second control of the same name is not the first again. */
   id: number;
@@ -325,7 +279,12 @@ const PAGES: PageType[] = [
   {
     name: "address",
     path: `/regtest/address/${chain.addresses.p2wpkh}`,
-    ready: (p) => p.getByRole("button", { name: /show the exact amount/ }).first(),
+    ready: (p) => p.getByRole("button", { name: /^Copy the exact balance/ }),
+  },
+  {
+    name: "address as of a block",
+    path: `/regtest/address/${chain.addresses.p2wpkh}?at=106`,
+    ready: (p) => p.getByRole("button", { name: /^Copy the exact balance/ }),
   },
   {
     name: "address above the node's cap",
@@ -339,6 +298,13 @@ const PAGES: PageType[] = [
     ready: (p) => p.getByRole("heading", { level: 1, name: "Next block" }),
   },
   { name: "mempool", path: "/regtest/mempool", ready: (p) => p.getByRole("slider").first() },
+  {
+    name: "fee track record",
+    path: "/regtest/fees/score",
+    ready: (p) => p.getByRole("table").first(),
+    // Mainnet's recorded week: regtest has too few blocks for any share.
+    before: serveScore,
+  },
   {
     name: "mining",
     path: "/regtest/mining",
@@ -360,6 +326,11 @@ const PAGES: PageType[] = [
     },
   },
   {
+    name: "timestamp",
+    path: "/regtest/timestamp",
+    ready: (p) => p.getByRole("heading", { level: 2, name: "Proof" }),
+  },
+  {
     name: "not found",
     path: "/regtest/no/such/page",
     ready: (p) => p.getByRole("heading", { level: 1, name: "Page not found" }),
@@ -374,6 +345,12 @@ const PAGES: PageType[] = [
     name: "Lightning node",
     path: `/regtest/lightning/node/${ACINQ}`,
     ready: (p) => p.getByRole("heading", { name: "At a glance" }),
+    before: (p) => serve(p, mainnet()),
+  },
+  {
+    name: "Lightning node's closes",
+    path: `/regtest/lightning/node/${ACINQ}?view=closed`,
+    ready: (p) => p.getByRole("heading", { name: "With whom" }),
     before: (p) => serve(p, mainnet()),
   },
   {
@@ -534,10 +511,7 @@ test("an SVG control's ring is a focus-coloured stroke, not any stroke it always
 });
 
 // Escape closes what opened and gives focus back to what opened it.
-test("Escape closes the network menu, an exact amount and the search's answer", async ({
-  page,
-  browserName,
-}) => {
+test("Escape closes the network menu and the search's answer", async ({ page, browserName }) => {
   const tab = browserName === "webkit" ? "Alt+Tab" : "Tab";
   // A second network, so the switch is a menu rather than a label.
   await page.route("**/app/config", (r) =>
@@ -554,30 +528,75 @@ test("Escape closes the network menu, an exact amount and the search's answer", 
   await expect(menu).toBeHidden();
   await expect(network).toBeFocused();
 
-  const exact = page.getByRole("button", { name: /show the exact amount/ }).first();
-  await exact.focus();
-  await page.keyboard.press("Enter");
-  const copy = page.getByRole("button", { name: /^Copy the exact/ });
-  await expect(copy).toBeVisible();
-  await page.keyboard.press(tab);
-  await expect(copy).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(copy).toBeHidden();
-  await expect(exact).toBeFocused();
-
   const search = page.getByRole("combobox", { name: "Search" });
   await search.fill("nothing like an id");
   await search.press("Enter");
-  // The answer is said, and Tab reaches its links.
+  // The answer is said, and Tab reaches its links, after the search's own scan button.
   await expect(page.getByRole("status").filter({ hasText: "Nothing matches" })).toHaveCount(1);
   await expect(page.getByText("Nothing matches", { exact: true })).toBeVisible();
   expect(await axe(page), "axe-core, the search's answer open").toEqual([]);
+  await page.keyboard.press(tab);
+  await expect(page.getByRole("button", { name: "Scan a QR code" })).toBeFocused();
   await page.keyboard.press(tab);
   await expect(page.locator(".search__panel a").first()).toBeFocused();
   await search.focus();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Nothing matches", { exact: true })).toBeHidden();
   await expect(search).toBeFocused();
+});
+
+// The command palette is a modal dialog over the page: its field, list and hints, with results of
+// several kinds, empty and typed, in both themes.
+test("the command palette has no checker finding, empty and with results, in either theme", async ({
+  page,
+}) => {
+  await page.goto("/regtest/blocks");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Blocks");
+  // ⌘K where the browser says it is Apple's (the WebKit profiles), Ctrl K elsewhere.
+  const apple = await page.evaluate(() => /Mac|iPhone|iPad|iPod/.test(navigator.userAgent));
+  await page.keyboard.press(apple ? "Meta+k" : "Control+k");
+  const dialog = page.getByRole("dialog", { name: "Go to" });
+  await expect(dialog.getByRole("option").first()).toBeVisible();
+  expect.soft(await axe(page), "axe-core, the palette empty").toEqual([]);
+  await dialog.getByRole("combobox").fill("2024-04-20");
+  await expect(dialog.getByRole("group", { name: "Go to a date" })).toBeVisible();
+  await dialog.getByRole("combobox").fill("106");
+  await expect(dialog.getByRole("option").first()).toContainText("Block 106");
+  expect.soft(await axe(page), "axe-core, the palette with results").toEqual([]);
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect.soft(await axe(page, ["color-contrast"]), "contrast, dark").toEqual([]);
+});
+
+test("the QR scanner has no checker finding, in either theme", async ({ page }) => {
+  await page.goto("/regtest/blocks");
+  await page.getByRole("button", { name: "Scan a QR code" }).click();
+  const dialog = page.getByRole("dialog", { name: "Scan a QR code" });
+  // Headless Chromium has no camera: the scanner says so, beside the picture it offers instead.
+  await expect(dialog.getByRole("status")).not.toHaveText("Starting the camera…");
+  await expect(dialog).toBeFocused();
+  expect.soft(await axe(page), "axe-core, the scanner").toEqual([]);
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect.soft(await axe(page, ["color-contrast"]), "contrast, dark").toEqual([]);
+});
+
+test("the block field has no checker finding, open and refusing what was typed, in either theme", async ({
+  page,
+}) => {
+  await page.goto(`/regtest/address/${chain.addresses.p2tr}`);
+  await page.getByRole("button", { name: "As of a block" }).click();
+  const field = page.getByLabel("Block height or date");
+  await expect(field).toBeVisible();
+  expect.soft(await axe(page), "axe-core, the field open").toEqual([]);
+  await field.fill("nonsense");
+  await field.press("Enter");
+  await expect(page.getByRole("alert")).toBeVisible();
+  expect.soft(await axe(page), "axe-core, the field refusing").toEqual([]);
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect.soft(await axe(page, ["color-contrast"]), "contrast, dark").toEqual([]);
+  await page.goto(`/regtest/address/${chain.addresses.p2tr}?at=x`);
+  await expect(page.getByRole("heading", { name: "“x” is not a block height" })).toBeVisible();
+  await page.getByRole("button", { name: "Another block" }).click();
+  expect.soft(await axe(page), "axe-core, a parameter that is no height, dark").toEqual([]);
 });
 
 /** Content wider than the screen outside anything that scrolls, with every disclosure open. */

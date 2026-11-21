@@ -17,6 +17,7 @@ import { withInvoice } from "./decode-answers";
 import { chain, stubRetargets } from "./fixtures";
 import { KEPT, LARGE, stubLarge } from "./large-address";
 import { penalties } from "./lightning-answers";
+import { serveScore } from "./score-answers";
 
 /** The keys of BIP352's first test vector as a test network silent payments address. */
 export const SILENT_PAYMENT =
@@ -79,6 +80,8 @@ export const PAGES: { path: string; stub?: (page: Page) => Promise<void> }[] = [
   { path: `/regtest/tx/${chain.txs.script_types}` },
   { path: `/regtest/tx/${chain.txs.cpfp_child}` },
   { path: `/regtest/address/${chain.addresses.p2tr}` },
+  // As of a block, with its band (docs/FRONTEND.md "An address as of a block").
+  { path: `/regtest/address/${chain.addresses.p2tr}?at=106` },
   { path: `/regtest/address/${LARGE}`, stub: (page) => stubLarge(page) },
   // Kept by the server's ledger, and being added up (docs/API.md, "Very large addresses").
   {
@@ -94,6 +97,12 @@ export const PAGES: { path: string; stub?: (page: Page) => Promise<void> }[] = [
   { path: "/regtest/mining", stub: stubRetargets },
   { path: "/regtest/mining/pool/unknown" },
   { path: "/regtest/mempool" },
+  // Regtest's own answer, then mainnet's recorded week: every level with its share and meter.
+  { path: "/regtest/fees/score" },
+  {
+    path: "/regtest/fees/score?window=1w",
+    stub: serveScore,
+  },
   // Empty, whichever test replaced a transaction first: its "none yet" once lay over the next part.
   { path: "/regtest/rbf", stub: noReplacements },
   { path: "/regtest/lightning", stub: lightning },
@@ -127,6 +136,8 @@ export const PAGES: { path: string; stub?: (page: Page) => Promise<void> }[] = [
     path: `/regtest/ark/arkade/address/${ARKADE_ADDRESS}?page=11#live`,
     stub: (page) => withArkadeAddress(page, true),
   },
+  // Waiting for its files: a proof's verdicts are drawn in timestamp.e2e.ts.
+  { path: "/regtest/timestamp" },
   // One page on every network: a named invoice with route hints.
   { path: "/decode#lnbc20m1example", stub: withInvoice },
   { path: "/regtest/no/such/page" },

@@ -46,12 +46,16 @@ test("an address page shows a new payment without a reload", async ({ page, rpc,
   const rows = page.getByRole("table").locator("tbody tr");
   await expect(rows.first()).toContainText("Unconfirmed");
   const before = await rows.count();
+  // The row a reader may be on, or a test may hold, when the history is asked again.
+  const held = await rows.first().elementHandle();
   // `mine` waits for the server to catch up; the block itself is one whose coinbase pays the
   // address, holding nothing from the mempool, so the payment is the only change.
   await mine(0);
   await rpc("generateblock", [chain.addresses.p2wpkh, []]);
   await expect(rows).toHaveCount(before + 1);
   await expect(page.locator("tbody tr.address-row--new")).toHaveCount(1);
+  // The rows already there are the same elements, moved down: nothing was rebuilt around them.
+  expect(await held?.evaluate((tr) => tr.isConnected)).toBe(true);
 });
 
 test("the balance chart steps with each block and follows a new payment", async ({
@@ -72,7 +76,13 @@ test("the balance chart steps with each block and follows a new payment", async 
   await page.getByText("Show the figures").click();
   const figures = page.getByRole("region", { name: /figures$/ }).locator("tbody tr");
   const balances = () => figures.evaluateAll((rows) => rows.map((r) => r.children[1]?.textContent));
-  await expect.poll(balances).toEqual(["0.30000000 BTC", "0.00000000 BTC", "0.50000000 BTC"]);
+  await expect
+    .poll(balances)
+    .toEqual([
+      "0.30\u202F000\u202F000 BTC",
+      "0.00\u202F000\u202F000 BTC",
+      "0.50\u202F000\u202F000 BTC",
+    ]);
   await expect(figures.nth(1)).toContainText("107");
 
   await expect(page.getByText("Live", { exact: true })).toBeVisible();
@@ -101,9 +111,14 @@ test("the balance chart steps with each block and follows a new payment", async 
   await expect(chart).toHaveAttribute("aria-valuemax", "3");
   await expect
     .poll(balances)
-    .toEqual(["0.50000000 BTC", "0.30000000 BTC", "0.00000000 BTC", "0.50000000 BTC"]);
+    .toEqual([
+      "0.50\u202F000\u202F000 BTC",
+      "0.30\u202F000\u202F000 BTC",
+      "0.00\u202F000\u202F000 BTC",
+      "0.50\u202F000\u202F000 BTC",
+    ]);
   await expect(chart).toHaveAttribute(
     "aria-valuetext",
-    /Balance 0\.50000000 BTC, Block \d+, Change \+0\.20000000 BTC$/,
+    /Balance 0\.50\s000\s000 BTC, Block \d+, Change \+0\.20\s000\s000 BTC$/,
   );
 });

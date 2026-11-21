@@ -89,6 +89,7 @@ Every parameter is parsed into a typed value before the node is asked, and the n
 | Txid or block hash | 64 hex digits, optional `0x`; a bad one is `404` | Exactly 64 hex digits, any case; a bad one is `400` |
 | Height, index, vout, `max_txs` | integer | Decimal digits only, at most `u32::MAX`; anything else is `400` |
 | Address | Parsed by the node; a bad or wrong-network one is `404` | Parsed for the network in the URL: `400 invalid address` or `400 address is for another network` |
+| Public key in an address's place | `404`: not an address | A point on the curve in hex: the pay-to-pubkey script it is paid by ([below](#public-keys)) |
 | `?asof=` on a route that does not take it, any other unknown query parameter, or one given twice | `404` for `asof`; others ignored | `400` |
 | `/txs/outspends?txids=` | Up to 50; a token that is not a hash gets an empty slot | Up to 50; any token that is not a txid is `400`. `%2C` is accepted as the comma |
 | `/block/:hash/txs/:start_index` not a multiple of 25 | `400` | `400`, before asking the node |
@@ -96,6 +97,17 @@ Every parameter is parsed into a typed value before the node is asked, and the n
 | Trailing or doubled slash | `404` | `404` |
 
 The node is sent canonical forms: lowercase hex, lowercase bech32 addresses, `/block/:hash/txs` as `/txs/0`, and `/txs/summary?after_txid=X` as `/txs/summary/X`. The node answers each pair the same.
+
+#### Public keys
+
+An output paid to a public key itself (P2PK: `<key> OP_CHECKSIG`, most of the early coinbases) has no address, so the key stands in for one. Every route that takes `:address` takes a key in its place: `/api/address/:a` and everything under it, `/app/address/:a/ledger` and `/size`, the address page's link preview, the `address:` topic ([`WS.md`](WS.md#following-a-transaction-or-an-address)), `track-address` and `track-addresses` on `/api/v1/ws`, which share its parser, and the MCP `get_address` tool ([`MCP.md`](MCP.md)).
+
+- **Form.** 66 hex digits starting `02` or `03` (compressed), or 130 starting `04` (uncompressed), any case, and a point on the curve. The two forms of one point are paid by two different scripts, so they are two different pages. A hybrid key (`06`, `07`) is refused: it parses as a point, but the script it is paid by could only be written from the hex, not from the key. Anything else of that shape is `400 invalid address`.
+- **Network.** A key belongs to no network: the same one is valid under every prefix, and answers zeros where nothing paid it.
+- **What the node is asked.** The script's hash, as `/scripthash/:hash` (SHA-256 of the script, byte-reversed as Electrum writes it, which is the order rbitcoin's route takes). So an answer passed on from the node is its scripthash answer, byte for byte, and totals carry `"scripthash"` where an address's carry `"address"`, those of a key the ledger keeps too. Limits, the large-address guard and the ledger key on the script's hash already, so a key costs what an address costs.
+- **Not** `/api/v1/validate-address`, which answers about addresses only.
+
+Checked on signet on 2026-11-19 with `04a8c3fa…c8d0f548`: 513 outputs funded and spent, 999 transactions, the totals another public explorer gives for that script. Code: `Payee` in `crates/server/src/esplora.rs`.
 
 ### Error bodies are ours
 
@@ -322,7 +334,7 @@ How we differ from the reference backend, measured side by side: progress, heigh
 | Field | Here | The reference's |
 |---|---|---|
 | `hostname` | `null` | Its host's name. Private ([`SECURITY.md`](SECURITY.md) rule 17) |
-| `version` | The server's version (`0.3.0`), as `/healthz` and `/app/config` say it | Its own release |
+| `version` | The server's version (`0.4.0`), as `/healthz` and `/app/config` say it | Its own release |
 | `gitCommit` | The commit the binary was built from, the 40 digits `/healthz` reports as `revision` ([`DEPLOY.md`](DEPLOY.md#health)); `null` for a build without one | 9 digits of its own commit |
 | `lightning` | Whether this network serves the Lightning routes | The same |
 | `backend` | `"esplora"`: transactions and addresses come from the node's Esplora | Its address backend: `esplora`, `electrum` or `none` |
@@ -544,21 +556,38 @@ A chart can then say "data from … onward" instead of drawing a false zero. Fee
 
 #### Who mined a block
 
-**The list.** `crates/engine/data/pools/pool-list.json` is [bitcoin-data/mining-pools](https://github.com/bitcoin-data/mining-pools)' generated list (149 pools, 174 tags, 201 addresses), copied unchanged from the `generated` branch at commit `0158b59` (2026-06-30). Its licence is MIT, read in its `LICENSE` file: copyright btc.com (2019–2021), whose list it forked, and 0xB10C and contributors since. MIT allows redistribution in this MIT project on the one condition that the notice travels with it, so `LICENSE` and a `README.md` naming the source and commit sit beside the file. mempool.space's own pool list was not used or opened. Pool ids are the list's; slugs are each name's ASCII letters and digits, lowercased. `local-pools.json` beside it holds our own additions in the same format, ids from 10000 so they never meet upstream's; it names P2Poolv2 by its `P2Poolv2` tag (it pays its miners directly, so it has no address), the Testnet 5 miner jaonoctus by the `@jaonoctus` tag only, and the Testnet 5 Stratum v2 pool plebhash by its `plebhash` tag only. A refresh from upstream that adds one of these pools must drop ours: the clash refuses the whole list and `shipped_list_parses_whole` fails.
+**The list.** `crates/engine/data/pools/pool-list.json` is [bitcoin-data/mining-pools](https://github.com/bitcoin-data/mining-pools)' generated list (149 pools, 174 tags, 201 addresses), copied unchanged from the `generated` branch at commit `0158b59` (2026-06-30). Its licence is MIT, read in its `LICENSE` file: copyright btc.com (2019–2021), whose list it forked, and 0xB10C and contributors since. MIT allows redistribution in this MIT project on the one condition that the notice travels with it, so `LICENSE` and a `README.md` naming the source and commit sit beside the file. mempool.space's own pool list was not used or opened. Pool ids are the list's; slugs are each name's ASCII letters and digits, lowercased. `local-pools.json` beside it holds our own additions in the same format, of two kinds.
+
+- **Pools upstream does not list,** ids from 10000 so they never meet upstream's: P2Poolv2 by its `P2Poolv2` tag (it pays its miners directly, so it has no address), the Testnet 5 miner jaonoctus by the `@jaonoctus` tag only, and the Testnet 5 Stratum v2 pool plebhash by its `plebhash` tag only.
+- **Tags and addresses for a pool upstream lists.** An entry that repeats the id and the name of a pool read from an earlier file adds its tags and addresses to that pool; its link is ignored. Answers print them with the pool's own (`regexes`, `addresses`). MARA Pool (id 140) gains the address `32i1m6gNcSHwiPX9nfTNXVjme9j5DU8y5g`, the only one its 401 blocks in the sample below pay, and the tag `MARA🇺🇸` (the letters and one flag), which is in the pool field of its Stratum V2 blocks (`Sv2/MARA🇺🇸🇺🇸//`, mainnet 975,369 and 976,280). Upstream has neither. The tag is not the bare `MARA`: four letters, matched anywhere in a coinbase with case ignored, are too easy to meet by accident. With one flag it is 12 bytes and still matches if the number of flags changes.
+
+Any other id or slug met twice, in one file or across the two, refuses the whole list. An address two pools list stays with the first to list it. A refresh from upstream must drop whatever of ours it brings: a pool of ours that upstream now lists clashes with it, so `shipped_list_parses_whole` fails, and a tag or address of ours that upstream now lists fails `shipped_additions_are_listed_once`.
 
 **The rules,** in order (`Pools::attribute`):
 
-1. **The coinbase tag wins:** the longest listed tag found anywhere in the coinbase script, ignoring ASCII case. Longest first, so a tag that contains another (`/ViaBTC/TATMAS Pool/` holds `/ViaBTC/`, `/solo.ckpool.org/` holds `ckpool`) wins over it. At equal length, the one earlier in the script, then the lower id.
+1. **The coinbase tag wins:** the longest listed tag found anywhere in the coinbase script, ignoring ASCII case. Longest first, so a tag that contains another (`/ViaBTC/TATMAS Pool/` holds `/ViaBTC/`, `/solo.ckpool.org/` holds `ckpool`) wins over it. At equal length, the one earlier in the script, then the lower id. **A Stratum V2 tag is searched in its pool field only,** between its delimiters (Stratum V2 tags, below), by the same comparison.
 2. **Otherwise a payout to a pool's listed address.** Among several payouts, the first in output order decides.
 3. **Otherwise `Unknown`** (id 0), counted and ranked like any pool, never dropped.
 
-A tag names whoever built the block. A payout only shows who got paid: P2Pool and TIDES pools (Ocean) pay their miners straight from the coinbase, so a solo miner with a listed address who joins one would otherwise take its blocks (Testnet 5 block 4329 is a P2Poolv2 block whose second payout is jaonoctus's). The address is the fallback for blocks with no listed tag. Pools also move payout addresses more often than lists follow: in the sample below, 3,615 of the 3,883 blocks named by tag alone belong to pools whose listed addresses they did not pay.
+A tag names whoever built the block. A payout only shows who got paid: P2Pool and TIDES pools (Ocean) pay their miners straight from the coinbase, so a solo miner with a listed address who joins one would otherwise take its blocks (Testnet 5 block 4329 is a P2Poolv2 block whose second payout is jaonoctus's). The address is the fallback for blocks with no listed tag. Pools also move payout addresses more often than lists follow: in the sample below, 3,214 of the 3,482 blocks named by tag alone belong to pools whose listed addresses they did not pay.
 
-**Hostile input.** The tag and payout scripts are written by whoever mined the block and are stored bounded (at most 100 bytes, eight scripts of 128): matching is a byte comparison of at most 174 tags of at most 30 bytes over 100 bytes and eight map lookups, allocates nothing per block and cannot panic. Invalid UTF-8 is just bytes. Names, tags and addresses in answers are the list's; the only chain bytes in an answer are a pool block's coinbase, as hex and as one Latin-1 character per byte, serialized as JSON strings. The private block facts (`/app/block/:hash/summary`, [`FRONTEND.md`](FRONTEND.md#block-summaries)) name each block's miner by the same rules, as the list's name and slug only.
+**Stratum V2 tags.** The Stratum V2 reference implementation writes a coinbase script as `coinbase_prefix || push("Sv2/<pool tag>/<miner tag>/") || push(extranonce)`. This is that implementation's convention, described in its discussion [SRI standard for Sv2 coinbase tags](https://github.com/stratum-mining/stratum/discussions/2141) and shipped with the `Sv2/` prefix since stratum v1.12.0 (2026-09-17). It is not a specification: sv2-spec does not mention the tag. Either tag may be empty and both delimiters are always written; nothing is escaped, so the miner tag may hold `/`. A pool that builds its own jobs writes `Sv2/<pool tag>//`. With Job Declaration the miner builds the script and the pool tag is empty: the discussion says explorers must then identify the pool by heuristics such as the payout address, which is rule 2 here. So the miner tag is the miner's own words, and a listed pool's name in it must not take the block: `Sv2//Foundry USA Pool/` is not Foundry USA's.
+
+`mining::sv2::tag` reads a script as this layout only when it is exactly this layout; any other script is searched whole, as before:
+
+1. The script is walked from its start, one operation at a time: a direct push (opcodes `0x01` to `0x4b`, all its bytes present) or a one-byte opcode with no data (`OP_0`, and `OP_1NEGATE` to `OP_16`: BIP34 writes heights 1 to 16 as `OP_1` to `OP_16`, and older templates add an `OP_0` after the height). Any other opcode ends the walk: no tag. Real template prefixes are only these: Bitcoin Core up to v30 writes the height and an `OP_0`, v31 and later the height alone, and the Stratum V2 Template Provider (sv2-tp) passes on Core's. A prefix holding any other opcode, or a longer push, is not read, so that script is searched whole, its miner tag included.
+2. The tag is the first direct push that starts after the script's first byte, where the height is, and no later than byte 8 (a template's `coinbase_prefix` holds at most 8 bytes, [sv2-spec, Template Distribution Protocol](https://github.com/stratum-mining/sv2-spec/blob/main/07-Template-Distribution-Protocol.md), `NewTemplate`), and whose data starts with `Sv2/`, ends with `/`, is valid UTF-8 and holds at least one more `/` between them. The pool tag runs to that first `/`; the miner tag is everything after it.
+3. One direct push of 1 to 32 bytes, the extranonce, follows the tag and ends the script.
+
+Testnet 5 block 2408 reads `Sv2/@jaonoctus/casa21.vinteum.org/0x539/`: pool tag `@jaonoctus`, miner tag `casa21.vinteum.org/0x539`. The listed tags are searched in the pool tag with the delimiter on each side of it, `/@jaonoctus/` here: about half the list's tags are written with slashes (`/ViaBTC/`), and so a pool that moves to Stratum V2 and writes its name as its pool tag (`Sv2/ViaBTC//`) keeps its blocks. Nothing of the miner tag is in that slice. A listed tag with a `/` inside it (2 of the 178: `/ViaBTC/TATMAS Pool/` and `okminer.com/euz`) never matches a pool tag, which ends at its first `/`: `Sv2/ViaBTC/TATMAS Pool//` is ViaBTC's and `Sv2/okminer.com/euz//` is `Unknown`, since the miner tag may itself hold `/` and the bytes cannot say where the pool's name ends.
+
+A block whose script is this layout is marked in the private block facts, whoever it is attributed to (`sv2`, [`FRONTEND.md`](FRONTEND.md#block-summaries)). The `/api/v1` shapes carry no such field.
+
+**Hostile input.** The tag and payout scripts are written by whoever mined the block and are stored bounded (at most 100 bytes, eight scripts of 128): matching is one read of the script as a Stratum V2 tag (a walk over at most its 100 bytes, nine operations at most, and a UTF-8 check of one push), a byte comparison of at most 178 tags of at most 30 bytes (both files' together) over at most 100 bytes, and eight map lookups. It allocates nothing per block and cannot panic. Invalid UTF-8 is just bytes, and a script that is not exactly the Stratum V2 layout is one more script searched whole. Names, tags and addresses in answers are the list's; the only chain bytes in an answer are a pool block's coinbase, as hex and as one Latin-1 character per byte, serialized as JSON strings. The private block facts (`/app/block/:hash/summary`, [`FRONTEND.md`](FRONTEND.md#block-summaries)) name each block's miner by the same rules, as the list's name and slug only.
 
 **Stored, not computed per request.** The block table keeps each row's pool (`pool` column, [`STORE.md`](STORE.md#blocks)), set when the row is written. Measured on a 975,000-row table: counting blocks per pool over all of history takes 0.2 s from the column, while attributing at query time means reading and matching every coinbase, 1.8 s, past the store's 2 s read limit under any load. Writing costs 2 µs a row more. The table records which list and rules (`pool_list.version`, a hash of the file and a rules number) its rows were attributed with; when a build ships another list, the first start redoes every row in batches of 10,000 (1.8 s for 975,000 rows, no node call) before the mining routes answer.
 
-**Quality,** over a bounded mainnet sample of 7,851 blocks (heights 967,676 to 975,526, 54 days): 99.69 % identified, 3,944 paying a listed address and 3,883 more by tag alone; 24 `Unknown` (blocks with no readable tag, a `j://<uuid>` tag, or `Sv2/MARA`). No block in the sample had a tag and an address naming different listed pools. For the same week the reference ranked 895 blocks and so did we; 891 were attributed alike. The 4 others carry the tag `/trustpool/` but pay ViaBTC's listed address: the reference says TrustPool, we say ViaBTC by rule 2, since the list has no TrustPool tag. Two pools are named differently from the reference's list: `Ocean.xyz` (`oceanxyz`, theirs `ocean`) and `BTC.com` (`btccom`, theirs `cloverpool`).
+**Quality,** over a bounded mainnet sample of 7,851 blocks (heights 967,676 to 975,526, 54 days): 99.71 % identified (7,828), 4,346 paying a listed address and 3,482 more by tag alone; 23 `Unknown` (16 blocks with no readable tag, 6 with a `j://<uuid>` tag and one solo miner's, `FutureBit-Solo Apollo`). These figures are the original measurement (99.69 %, 3,944 and 3,883, 24 `Unknown`) brought forward by a recount, on 2026-11-17, of MARA Pool's and `Unknown`'s blocks in the sample, read from this API: all 401 of MARA Pool's pay only the address now listed for it, so they moved from tag alone to a listed address, and the sample's one `Sv2/MARA` block (975,369), `Unknown` until then, pays it too and is MARA Pool's by its tag. The rest of the sample was not read again. No block in the sample had a tag and an address naming different listed pools. For the address added to MARA Pool this was checked again over the whole sample on 2026-11-20: exactly 402 blocks pay it, MARA Pool's 401 and 975,369, and the tag `MARA🇺🇸` is in no other block's coinbase. For the same week the reference ranked 895 blocks and so did we; 891 were attributed alike. The 4 others carry the tag `/trustpool/` but pay ViaBTC's listed address: the reference says TrustPool, we say ViaBTC by rule 2, since the list has no TrustPool tag. That comparison was made with the original measurement and not again since; block 975,369 was `Unknown` here then. Two pools are named differently from the reference's list: `Ocean.xyz` (`oceanxyz`, theirs `ocean`) and `BTC.com` (`btccom`, theirs `cloverpool`).
 
 #### Hashrate
 
@@ -816,7 +845,7 @@ Differences: the reference wrote `"scriptpubkey_address": ""` for an output with
 
 #### Cost and comparison
 
-Every route but `prevouts` asks the node nothing: a request is a parse and a few hash-map lookups under the engines' read locks (`cpfp` over at most 64 transactions, `transaction-times` over at most 100). The two tree lists are built once per change of the replacement record and kept, so a request between changes copies bytes. The record holds at most `REPLACEMENTS_KEPT` replacements, about 0.3 KB each in memory (3 MB at the default bound); the store holds the same rows at 205 bytes each (2.1 MB, [`STORE.md`](STORE.md#replacements)).
+Every route but `prevouts` asks the node nothing: a request is a parse and a few hash-map lookups under the engines' read locks (`cpfp` over at most 64 transactions, `transaction-times` over at most 100). The two tree lists are built once per change of the replacement record and kept, so a request between changes copies bytes. The record holds at most `REPLACEMENTS_KEPT` replacements, about 0.4 KB each in memory (4 MB at the default bound) with two-output payments on both sides, at most about 3.2 KB with the most outputs kept; the store holds the same rows at 321 bytes each (3.2 MB), at most 4.2 KB ([`STORE.md`](STORE.md#replacements)).
 
 **Against the node and the reference,** mainnet, 2026-11-12, 12:43 to 13:30 UTC: one release build with the engine on (59,000 to 63,000 transactions, read-only, blocks 975,555 and 975,556), then a restart on the final build. Server times are from a client on the same machine; the node is on the LAN.
 
@@ -982,6 +1011,7 @@ What the Lightning pages read; one request for each page's main content. Real ma
 | `GET /rankings/:by` | `by` is `capacity`, `channels` or `age` (oldest first funding first); `{by, nodes: [{id, alias, capacity, channels, first_seen, last_update}]}`, `?limit=` up to 100 |
 | `GET /nodes/:key` | The node page: below |
 | `GET /nodes/:key/channels?status=&page=&sort=&dir=&q=&peer=&state=&fee=&kind=` | `{status, page, per_page, total, sort, dir, channels}`, and for open channels `states`: open channels from the index, largest first unless sorted otherwise; closed ones from the store, newest close first unless sorted otherwise ([below](#a-nodes-channels)) |
+| `GET /nodes/:key/closes` | The node's close record: below ([A node's close record](#a-nodes-close-record)) |
 | `GET /nodes/:key/history` | `{from, points: [{time, channels, capacity}]}`: the node's open channels and capacity at each UTC midnight since `from` (when our history starts: the first statistics snapshot; `null` before it), at the block time of each of its channels' opens and closes after the first midnight, then now, oldest first. A chart steps at the changes rather than drawing a slope between midnights |
 | `GET /channels/:id` | The channel page: below. Open or closed |
 | `GET /channels/:id/fees` | `{id, scid, node_one, node_two, watched}`: the channel's [fee history](#fee-history), each end's records oldest first |
@@ -1082,6 +1112,33 @@ GET /app/lightning/nodes/03864ef0…3f8f/channels?sort=out&state=here&q=lnd
 {"status": "open", "page": 0, "per_page": 25, "total": 2, "sort": "out", "dir": "asc",
  "states": {"active": 61, "here": 2, "peer": 0, "inactive": 0}, "channels": […]}
 ```
+
+###### A node's close record
+
+`GET /app/lightning/nodes/:key/closes` says how the node's channels this server watched ended, from at most its newest 10,000 closes, beside every channel's as the overview last worked them out ([`LIGHTNING.md`](LIGHTNING.md#a-nodes-close-record)). It takes no parameters. A node with a stored close answers even once it has left the graph; one with neither a stored close nor an open channel is `404 node not found`.
+
+```json
+GET /app/lightning/nodes/03864ef0…3f8f/closes
+{"id": "03864ef0…3f8f", "from": 1794502800, "time": 1795220043, "minimum": 20, "cap": 10000, "capped": false,
+ "node": {"closed": 79, "cooperative": 54, "force": 25, "penalty": 0, "other": 0,
+          "shares": {"cooperative": 68.4, "force": 31.6, "penalty": 0.0, "other": 0.0},
+          "fees": {"cooperative": {"sum": 16886, "known": 54}, "force": {"sum": 15323, "known": 25}, …},
+          "weeks": [{"time": 1794182400, "cooperative": 20, "force": 20, "penalty": 0, "other": 0}, …]},
+ "peers": {"count": 64, "forced": 25, "more": 0, "list": [
+   {"id": "0200dc…dd97", "alias": null, "held": false, "closed": 1, "cooperative": 0, "force": 1, "penalty": 0, "other": 0, "shares": null, "open": 0}, …]},
+ "network": {"time": 1795220043, "closed": 1802, "cooperative": 1638, "force": 158, "penalty": 0, "other": 6,
+             "shares": {…}, "fees": {…}, "weeks": […]}}
+```
+
+- **Each closed channel counts once, in one kind,** and in both its nodes' records: `penalty` is a force close whose commitment this server later saw swept with its revocation key, never also `force`. `closed` is their sum. A stored row whose two ends are the same node counts once and lists no peer.
+- **At most `cap` closes are read** (10,000), the node's newest. `capped` is `true` when it has more: the record is then of those newest closes only, and `from` is the oldest of them.
+- **`from`** is when the record runs from: with every close read, the history's start (the first statistics snapshot) or the oldest stored close if older; `null` before either exists. `weeks` start on a Monday, 00:00 UTC, oldest first, every week from `from`'s to now present, at most the newest 520: past that, the first week listed also counts every older close, so it is not one week's.
+- **`shares`** are each kind's percent of `closed` to one decimal, `null` below `minimum` closes (20), for the node, each peer and the network alike: a share of a handful of closes is not a rate.
+- **`fees`** sum the closing transactions' fees, sats, over the `known` closes whose fee the node gave. Who paid them the chain does not say.
+- **`peers`** are the other ends of its closed channels: `count` how many, `forced` those whose channels with it ended in a force close or penalty, `list` up to 50 of these, most force closes and penalties first, then most closes, then by key, `more` how many more there are. A peer's `open` is the node's channels with it open now, `held` whether the graph holds it (it has a page), and its `alias` is `null` when the graph holds none.
+- **`network`** is every stored close as the overview last worked them out (`time`), every ten minutes, from when the history starts; `null` until the first computation after a start. It is not of the same moment as the node's part: a close or sweep since `time` is in the node's figures and not in the network's, and a node's week after `time` has no network week.
+
+**Cost, bounded.** One read of at most 10,001 entries of each of the node's two closed-row indexes, newest close first (`0022`), whatever the node's history, a pass over at most 10,000 rows, and the node's open channels in the index. On mainnet's store of 2026-11-20 (37,822 rows, 1,802 closed) the read for the node with the most closes (403) takes 0.55 ms median, the whole answer 0.2 to 0.8 ms over loopback. On a synthetic store, one request for a node of 50,000 closes across 5,000 peers takes 14 ms and 4.9 MB more peak memory, and for one of 200,000 the same, 14 ms and 5.3 MB, where reading every row took 40 ms and 21 MB, and 157 ms and 77 MB ([`LIGHTNING.md`](LIGHTNING.md#a-nodes-close-record)). `Cache-Control: public, max-age=10`.
 
 ###### Fee history
 

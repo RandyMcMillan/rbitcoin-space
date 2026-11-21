@@ -37,6 +37,7 @@ export function describe(raw: string, network: Network, lightning = false): Read
   if (q?.kind === "address") {
     const { type, networks } = q.address;
     const theirs = networks.includes(network) ? null : networkNames(networks);
+    if (type === "p2pk") return { label: "Public key (P2PK)", ready: true };
     return { label: `${theirs ?? TYPE_NAMES[type].short} address`, ready: true };
   }
   if (raw.length > MAX_QUERY) return { label: "Too long", ready: false };
@@ -135,14 +136,19 @@ export function createSearch(
   const lightning = async (network: Network) =>
     (await config())?.lightning.includes(network) ?? false;
 
-  const run = async (raw: string, network: Network): Promise<Outcome | undefined> => {
+  /**
+   * Where `raw` leads on `network`. Text that is no identifier searches Lightning's node names
+   * where the network has Lightning, unless `names` is false: a scanned code is what it holds,
+   * never a name to look for.
+   */
+  const run = async (raw: string, network: Network, names = true): Promise<Outcome | undefined> => {
     const controller = start();
     const { signal } = controller;
     let outcome: Outcome;
     try {
       const query = classify(raw);
       outcome =
-        query === null && searchProblem(raw) === undefined && (await lightning(network))
+        names && query === null && searchProblem(raw) === undefined && (await lightning(network))
           ? { kind: "go", path: paths.lightningSearch(raw.trim()) }
           : await resolve(query, (path) => fetch(network, path, signal));
     } catch (error) {
@@ -185,8 +191,17 @@ export function createSearch(
   return { run, suggest, cancel };
 }
 
+/**
+ * Someone else's text (what a scanned code holds) fit to show: control and invisible format
+ * characters, bidi overrides among them, made visible as U+FFFD, as an alias's are.
+ */
+export function visible(text: string): string {
+  return cleanAlias(text) ?? "\u{FFFD}";
+}
+
 /** What the field gets from this module once it loads. */
 export interface Logic {
   describe: typeof describe;
   createSearch: typeof createSearch;
+  visible: typeof visible;
 }

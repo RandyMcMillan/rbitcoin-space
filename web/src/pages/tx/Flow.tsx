@@ -4,11 +4,16 @@ import { Amount } from "../../components/Amount";
 import { FeeRate } from "../../components/FeeRate";
 import { Hash } from "../../components/Hash";
 import { Link } from "../../components/Link";
+import { scriptKey } from "../../lib/address";
 import type { Outspend, Transaction, Vout } from "../../lib/esplora";
 import { feeColor, groupDigits } from "../../lib/format";
+import type { Lookalike } from "../../lib/lookalike";
 import { paths } from "../../lib/network";
 import type { TagPart } from "../block/chain";
 import { type ChainText, coinbaseText, inputText, outputText } from "./chaintext";
+import { LookalikeTag } from "./Lookalike";
+import { CardMarks } from "./Privacy";
+import type { Mark } from "./privacytext";
 import { classify } from "./script";
 import {
   cssMs,
@@ -105,6 +110,10 @@ export function Flow(props: {
   outspends: () => Outspend[] | null | undefined;
   selected: Selection | null;
   onSelect: (s: Selection) => void;
+  /** Lookalike addresses handed over from an address page, by address: marked on their cards. */
+  lookalike?: ReadonlyMap<string, Lookalike> | undefined;
+  /** What the privacy check says of each card, keyed `in:N` and `out:N` (privacytext.ts). */
+  marks?: ReadonlyMap<string, readonly Mark[]> | undefined;
 }) {
   const [inPresses, setInPresses] = createSignal(0);
   const [outPresses, setOutPresses] = createSignal(0);
@@ -132,26 +141,7 @@ export function Flow(props: {
   const [view, setView] = createSignal("0 0 0 0");
 
   // Ribbon geometry from where the cards actually sit. One layout read per draw.
-  // An exact amount wider than its card (a phone's, in a wide font) reads in magnitude there.
-  const fitAmounts = () => {
-    // Only amounts with a magnitude form to fall back on (`fit`); a total has none.
-    const fits = flowEl?.querySelectorAll<HTMLElement>(".tx-flow__item .amount[data-short]");
-    for (const amount of fits ?? []) {
-      const exact = amount.querySelector(".amount__exact");
-      const card = amount.closest(".tx-flow__item");
-      if (!exact || !card) continue;
-      amount.classList.remove("amount--tight");
-      // 2 px clear of the border on each side, where it actually sits: an amount wider than its
-      // line runs out on one side only, so it has one side's padding to spare, not both.
-      const e = exact.getBoundingClientRect();
-      const inner = card.getBoundingClientRect().left + card.clientLeft;
-      const wide = e.left < inner + 2 || e.right > inner + card.clientWidth - 2;
-      amount.classList.toggle("amount--tight", wide);
-    }
-  };
-
   const draw = () => {
-    fitAmounts();
     if (!svgEl || !inCol || !outCol) return;
     const box = svgEl.getBoundingClientRect();
     const W = box.width;
@@ -243,6 +233,11 @@ export function Flow(props: {
     { defer: true },
   );
 
+  const marked = (out: Vout | null | undefined) => {
+    const a = out?.scriptpubkey_address;
+    return a !== undefined && props.lookalike?.has(a) === true;
+  };
+
   const isSel = (side: Side, index: number) =>
     props.selected?.side === side && props.selected.index === index;
 
@@ -261,10 +256,14 @@ export function Flow(props: {
     </button>
   );
 
+  /** Whom an output pays: its address, or the key of a pay-to-pubkey script, which has none. */
+  const payee = (out: Vout | null | undefined) =>
+    out?.scriptpubkey_address ?? (out ? scriptKey(out.scriptpubkey) : undefined);
+
   /** The address, cut in the middle only as far as the card needs; or what the script is. */
   const who = (out: Vout | null | undefined): JSX.Element => (
     <Show
-      when={out?.scriptpubkey_address}
+      when={payee(out)}
       fallback={<span class="tx-flow__label">{out ? scriptLabel(out) : "Unknown"}</span>}
     >
       {(a) => <Hash value={a()} href={paths.address(a())} fit copy={false} />}
@@ -282,7 +281,7 @@ export function Flow(props: {
         Show {groupDigits(Math.min(hidden, MORE_STEP))} more
       </button>
       <span class="tx-flow__amt">
-        <Amount sats={value} unit={false} fit />
+        <Amount sats={value} unit={false} wrap />
       </span>
       <span class="tx-flow__meta">
         {groupDigits(hidden)} more {side === "in" ? "inputs" : "outputs"}
@@ -306,7 +305,7 @@ export function Flow(props: {
             >
               <span class="tx-flow__who">Coinbase</span>
               <span class="tx-flow__amt">
-                <Amount sats={totalOut(props.tx)} unit={false} fit />
+                <Amount sats={totalOut(props.tx)} unit={false} wrap />
               </span>
               <span class="tx-flow__meta">New coins and fees</span>
               <Memo t={coinbaseText(props.tx)} label={false} />
@@ -317,20 +316,30 @@ export function Flow(props: {
           <For each={vin().slice(0, inShown())}>
             {(input, i) => (
               <li
-                class={["tx-flow__item", { "is-selected": isSel("in", i()) }]}
+                class={[
+                  "tx-flow__item",
+                  {
+                    "is-selected": isSel("in", i()),
+                    "tx-flow__item--lookalike": marked(input.prevout),
+                  },
+                ]}
                 data-value={input.prevout?.value ?? 0}
                 data-key={i()}
               >
                 <span class="tx-flow__who">{who(input.prevout)}</span>
                 <span class="tx-flow__amt">
                   <Show when={input.prevout} fallback={<span class="amount">–</span>}>
-                    {(p) => <Amount sats={p().value} unit={false} fit />}
+                    {(p) => <Amount sats={p().value} unit={false} wrap />}
                   </Show>
                 </span>
                 <span class="tx-flow__meta">
-                  {input.prevout?.scriptpubkey_address
+                  <Show when={marked(input.prevout)}>
+                    <LookalikeTag />
+                  </Show>
+                  {input.prevout && payee(input.prevout)
                     ? classify(input.prevout.scriptpubkey).label
                     : ""}
+                  <CardMarks marks={props.marks?.get(`in:${i()}`)} />
                 </span>
                 <Memo t={inputText(input)} label />
                 {openButton("in", i())}
@@ -372,22 +381,29 @@ export function Flow(props: {
         <For each={props.tx.vout.slice(0, outShown())}>
           {(out, i) => (
             <li
-              class={["tx-flow__item", { "is-selected": isSel("out", i()) }]}
+              class={[
+                "tx-flow__item",
+                { "is-selected": isSel("out", i()), "tx-flow__item--lookalike": marked(out) },
+              ]}
               data-value={out.value}
               data-key={i()}
             >
               <span class="tx-flow__who">{who(out)}</span>
               <span class="tx-flow__amt">
-                <Amount sats={out.value} unit={false} fit />
+                <Amount sats={out.value} unit={false} wrap />
               </span>
               <span class="tx-flow__meta">
-                <Show when={out.scriptpubkey_address}>
+                <Show when={marked(out)}>
+                  <LookalikeTag />
+                </Show>
+                <Show when={payee(out)}>
                   <span>{classify(out.scriptpubkey).label}</span>
                 </Show>
                 <Spent
                   unspendable={whyUnspendable(props.tx, out) !== null}
                   spend={props.outspends()?.[i()]}
                 />
+                <CardMarks marks={props.marks?.get(`out:${i()}`)} />
               </span>
               <Memo t={outputText(out)?.parts ? outputText(out) : null} label={false} />
               {openButton("out", i())}
@@ -409,7 +425,7 @@ export function Flow(props: {
           >
             <span class="tx-flow__who">Fee</span>
             <span class="tx-flow__amt">
-              <Amount sats={fee()} unit={false} fit />
+              <Amount sats={fee()} unit={false} wrap />
             </span>
             <span class="tx-flow__meta">
               <FeeRate rate={rate()} />
@@ -425,18 +441,25 @@ export function Flow(props: {
 function Spent(props: { unspendable: boolean; spend: Outspend | undefined }) {
   return (
     <Show when={!props.unspendable} fallback={<span>Unspendable</span>}>
-      <Show when={props.spend}>
-        {(s) => (
-          <Show when={s().spent && s().txid} fallback={<span>Unspent</span>}>
-            {(by) => (
-              <Link href={paths.tx(by())} class="tx-flow__spent">
-                {s().status?.confirmed === false ? "Being spent" : "Spent"}
-                <span class="visually-hidden"> in transaction {by()}</span>
-              </Link>
-            )}
-          </Show>
-        )}
-      </Show>
+      {/* The status's place from the start, as wide as its widest words, so the line wraps the
+          same before the spends arrive and after, in any font. */}
+      <span class="tx-flow__status">
+        <span class="tx-flow__status-room" aria-hidden="true">
+          Being spent
+        </span>
+        <Show when={props.spend}>
+          {(s) => (
+            <Show when={s().spent && s().txid} fallback={<span>Unspent</span>}>
+              {(by) => (
+                <Link href={paths.tx(by())} class="tx-flow__spent">
+                  {s().status?.confirmed === false ? "Being spent" : "Spent"}
+                  <span class="visually-hidden"> in transaction {by()}</span>
+                </Link>
+              )}
+            </Show>
+          )}
+        </Show>
+      </span>
     </Show>
   );
 }

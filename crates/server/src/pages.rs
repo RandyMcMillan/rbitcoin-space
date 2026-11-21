@@ -197,12 +197,15 @@ impl Pages {
                 }
             }
             [_, Some("address"), Some(a), None] => {
-                let address = esplora::address(a, network).ok()?.to_string();
+                let payee = esplora::payee(a, network).ok()?;
+                let (what, lower) = match payee {
+                    esplora::Payee::Address(_) => ("Address", "address"),
+                    esplora::Payee::Key(_) => ("Public key", "public key"),
+                };
+                let name = payee.to_string();
                 Head {
-                    title: format!("Address {}", short(&address)),
-                    description: format!(
-                        "{on} address {address}: its balance and its transactions."
-                    ),
+                    title: format!("{what} {}", short(&name)),
+                    description: format!("{on} {lower} {name}: its balance and its transactions."),
                 }
             }
             [_, Some("mining"), None, None] => Head {
@@ -231,6 +234,12 @@ impl Pages {
                 title: "Replacements".into(),
                 description: format!(
                     "Transactions replaced on {on}'s mempool, newest first: what replaced what, how much the fee rate rose, and which was mined, live."
+                ),
+            },
+            [_, Some("fees"), Some("score"), None] => Head {
+                title: "Fee track record".into(),
+                description: format!(
+                    "How often this server's recommended fees on {on} were mined in time: each level against its 85% target, what it cost, and what the figures rest on."
                 ),
             },
             [_, Some("lightning"), None, None] => Head {

@@ -24,7 +24,13 @@ import { SectionHeader } from "../../components/SectionHeader";
 import { Empty, ErrorState, Loading } from "../../components/States";
 import { type ApiRequest, createRequest } from "../../lib/api";
 import { useNow } from "../../lib/clock";
-import { formatBtcShort, formatPowerOfTen, formatUtc, groupDigits } from "../../lib/format";
+import {
+  formatBtc,
+  formatBtcShort,
+  formatPowerOfTen,
+  formatUtc,
+  groupDigits,
+} from "../../lib/format";
 import { type Network, paths } from "../../lib/network";
 import { useNetwork, usePageTitle } from "../../lib/page";
 import {
@@ -81,6 +87,8 @@ const CLOSE_DAYS = 30;
 /** A figure's unit kept with it: the last plain space becomes a no-break one. */
 const whole = (s: string) => s.replace(/ (?=[^ ]+$)/, "\u00A0");
 const btc = (sats: number) => whole(`${formatBtcShort(sats)} BTC`);
+/** A chart's readout of one point is exact, its axis compact (a mean may be a fraction of a sat). */
+const btcExact = (sats: number) => formatBtc(Math.round(sats));
 
 /** "12 Nov": the year only when it is not the year of `ref`, the newest moment beside it. */
 function day(t: number, ref: number): string {
@@ -95,6 +103,8 @@ interface Figure {
   fmt: (n: number) => string;
   axis: (n: number) => string;
   unit?: string;
+  /** The unit of the raw figure, for the chart's CSV: capacities are in sats. */
+  raw?: string;
   /** A long change in magnitude, for a figure's narrowest room. */
   short?: (n: number) => string;
   /** The mean beside a median, in the chart's readout. */
@@ -105,13 +115,14 @@ interface Figure {
 const FIGURES: readonly [Figure, ...Figure[]] = [
   { key: "channels", label: "Channels", fmt: groupDigits, axis: groupDigits },
   { key: "nodes", label: "Nodes", fmt: groupDigits, axis: groupDigits },
-  { key: "capacity", label: "Capacity", fmt: btc, axis: formatBtcShort, unit: "BTC" },
+  { key: "capacity", label: "Capacity", fmt: btc, axis: formatBtcShort, unit: "BTC", raw: "sat" },
   {
     key: "med_capacity",
     label: "Median channel",
     fmt: btc,
     axis: formatBtcShort,
     unit: "BTC",
+    raw: "sat",
     mean: { key: "avg_capacity", fmt: btc },
   },
   {
@@ -120,6 +131,7 @@ const FIGURES: readonly [Figure, ...Figure[]] = [
     fmt: ppm,
     axis: groupDigits,
     unit: "ppm",
+    raw: "ppm",
     short: (n) => `${formatPowerOfTen(n)} ppm`,
     mean: { key: "avg_fee_rate", fmt: ppm },
   },
@@ -129,6 +141,7 @@ const FIGURES: readonly [Figure, ...Figure[]] = [
     fmt: msat,
     axis: groupDigits,
     unit: "msat",
+    raw: "msat",
     short: msatAsBtc,
     mean: { key: "avg_base_fee_msat", fmt: msat },
   },
@@ -514,14 +527,24 @@ function HistoryChart(props: { s: Series; period: Period; figure: Figure }) {
               name: f().label,
               values: col(f().key),
               draw: "line",
-              format: f().axis,
+              format: f().unit === "BTC" ? btcExact : f().axis,
               ...(f().unit === undefined ? {} : { unit: f().unit }),
+              ...(f().raw === undefined ? {} : { rawUnit: f().raw }),
               marks: true,
             },
           ]}
           notes={(() => {
             const m = f().mean;
-            return m === undefined ? [] : [{ name: "Mean", values: col(m.key), format: m.fmt }];
+            return m === undefined
+              ? []
+              : [
+                  {
+                    name: "Mean",
+                    values: col(m.key),
+                    format: f().unit === "BTC" ? (n: number) => `${btcExact(n)} BTC` : m.fmt,
+                    ...(f().raw === undefined ? {} : { rawUnit: f().raw }),
+                  },
+                ];
           })()}
           time={time()}
         />

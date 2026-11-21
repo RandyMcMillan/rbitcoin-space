@@ -58,6 +58,20 @@ describe("netChange", () => {
     expect(netChange(t, ME)).toBe(-21_000);
   });
 
+  it("finds a public key's outputs by their script: they name no address", () => {
+    const key = `02${"ab".repeat(32)}`;
+    const paid = (value: number): Vout => ({
+      scriptpubkey: `21${key}ac`,
+      scriptpubkey_asm: "",
+      scriptpubkey_type: "p2pk",
+      value,
+    });
+    const input: Vin = { ...spend(OTHER, 0), prevout: paid(50_000) };
+    expect(netChange(tx([input], [paid(20_000), out(OTHER, 29_000)]), key)).toBe(-30_000);
+    // The same key uncompressed is paid by another script.
+    expect(netChange(tx([input], [paid(20_000)]), `04${"ab".repeat(64)}`)).toBe(0);
+  });
+
   it("leaves only the fee on a self-transfer", () => {
     expect(netChange(tx([spend(ME, 50_000)], [out(ME, 49_000)]), ME)).toBe(-1000);
   });
@@ -112,6 +126,14 @@ describe("refusal", () => {
       "too-large",
     ],
     [new ApiError(503, "Address index is disabled on this server."), "no-index"],
+    [
+      new ApiError(
+        503,
+        "Unspent outputs and older history are not kept for an address this large.",
+      ),
+      "not-kept",
+    ],
+    [new ApiError(404, "Not found."), "gone"],
     [new ApiError(400, "Address is for another network."), "wrong-network"],
     [new ApiError(400, "Invalid address."), "invalid"],
     [new ApiError(503, "Node unavailable."), "failed"],

@@ -1,5 +1,6 @@
 import { createRouter, memoryHistory } from "@solidjs/router";
 import { render } from "@solidjs/web";
+import { flush } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUDIT } from "../../components/audit/fakes";
 import { FakeSocket } from "../../lib/fakes";
@@ -213,10 +214,10 @@ describe("BlockPage", () => {
   it("shows a block by hash with reward, fees and neighbours", async () => {
     serve(normal());
     const el = open(`/block/${HASH}`);
-    await until(() => expect(fact(el, "Reward")).toContain("3.13000000 BTC"));
+    await until(() => expect(fact(el, "Reward")).toContain("3.13 000 000 BTC"));
     expect(text(el.querySelector("h1") as Element)).toBe("Block 975 411");
     expect(fact(el, "Total fees")).toContain("500 000 sats");
-    expect(fact(el, "Reward")).toContain("3.12500000 BTC subsidy");
+    expect(fact(el, "Reward")).toContain("3.12 500 000 BTC subsidy");
     expect(fact(el, "Confirmations")).toContain("10");
     expect(fact(el, "Fullness")).toContain("99.8%");
     // The facts come before the drawing in reading order, so a phone shows them first.
@@ -283,7 +284,7 @@ describe("BlockPage", () => {
       input.includes("/app/blocks/summary") ? new Promise(() => {}) : served(input),
     );
     const el = open(`/block/${HASH}`);
-    await until(() => expect(fact(el, "Reward")).toContain("3.13000000 BTC"));
+    await until(() => expect(fact(el, "Reward")).toContain("3.13 000 000 BTC"));
     expect(el.querySelector(".audit__rate")).toBeNull();
     const socket = await until(() => FakeSocket.last());
     socket.hello({ network: "mainnet" });
@@ -321,6 +322,54 @@ describe("BlockPage", () => {
     // The tag is shown as the miner wrote it, in its own fact, as text.
     await until(() => expect(fact(el, "Coinbase tag")).toContain("<img src=x onerror=alert(1)>"));
     expect(el.querySelector("img")).toBeNull();
+  });
+
+  it("marks a block mined over Stratum V2, and says what the mark rests on", async () => {
+    const miner = { name: "MARA Pool", slug: "marapool" };
+    serve({ ...normal(), [summaryPath(HASH)]: { body: [{ ...SUMMARY, miner, sv2: true }] } });
+    const el = open(`/block/${HASH}`);
+    await until(() => expect(fact(el, "Miner")).toContain("MARA Pool"));
+    const mark = el.querySelector<HTMLButtonElement>(".block-fact .block-miner button");
+    expect(text(mark?.querySelector(".block-sv2") as Element)).toBe("Sv2");
+    const described = document.getElementById(mark?.getAttribute("aria-describedby") ?? "");
+    expect(described?.textContent).toBe(
+      "Stratum V2 coinbase tag. The coinbase is laid out as the Stratum V2 reference implementation " +
+        "writes it, Sv2/<pool tag>/<miner tag>/. That is what the block's builder wrote, not " +
+        "something the chain proves.",
+    );
+    // The mark sits beside the name, outside its link, which still leads to the pool.
+    const link = el.querySelector<HTMLAnchorElement>(".block-fact .block-miner a");
+    expect(link?.textContent).toBe("MARA Pool");
+    expect(link?.getAttribute("href")).toBe("/mining/pool/marapool");
+    expect(document.querySelector("body > .note")).toBeNull();
+    mark?.focus();
+    flush();
+    expect(document.querySelector("body > .note")?.textContent).toContain(
+      "Stratum V2 coinbase tag",
+    );
+  });
+
+  it("marks an Unknown miner's Stratum V2 block too", async () => {
+    const miner = { name: "Unknown", slug: "unknown" };
+    serve({ ...normal(), [summaryPath(HASH)]: { body: [{ ...SUMMARY, miner, sv2: true }] } });
+    const el = open(`/block/${HASH}`);
+    await until(() => expect(fact(el, "Miner")).toContain("No listed address or tag"));
+    expect(el.querySelector(".block-fact .block-miner button .block-sv2")).not.toBeNull();
+  });
+
+  it("shows no Stratum V2 mark for an ordinary block, or from a server that sends none", async () => {
+    const miner = { name: "Foundry USA", slug: "foundryusa" };
+    for (const facts of [
+      { ...SUMMARY, miner, sv2: false },
+      { ...SUMMARY, miner },
+    ]) {
+      clearApiCache();
+      clearSummaries();
+      serve({ ...normal(), [summaryPath(HASH)]: { body: [facts] } });
+      const el = open(`/block/${HASH}`);
+      await until(() => expect(fact(el, "Miner")).toBe("Foundry USABy payout address or tag"));
+      expect(el.querySelector(".block-sv2")).toBeNull();
+    }
   });
 
   it("offers a retry for the miner when the facts fail", async () => {
@@ -695,11 +744,11 @@ describe("BlockPage", () => {
         "0.00 sat/vB",
       ),
     );
-    await until(() => expect(fact(el, "Total fees")).toContain("0.00500000 BTC"));
+    await until(() => expect(fact(el, "Total fees")).toContain("0.00 500 000 BTC"));
     expect(fact(el, "Total fees")).toContain("500 000 sats");
     await until(() =>
       expect(fact(el, "Reward")).toContain(
-        "3.12000000 BTC0.01000000 BTC less than the subsidy and fees allowed",
+        "3.12 000 000 BTC0.01 000 000 BTC less than the subsidy and fees allowed",
       ),
     );
     // A tag with nothing after the height says so, rather than "shown as hex" over a dash.
@@ -709,7 +758,7 @@ describe("BlockPage", () => {
   it("uses the network's halving interval", async () => {
     serve(normal());
     const el = open(`/signet/block/${HASH}`);
-    await until(() => expect(fact(el, "Reward")).toContain("3.12500000 BTC subsidy"));
+    await until(() => expect(fact(el, "Reward")).toContain("3.12 500 000 BTC subsidy"));
   });
 });
 
@@ -768,11 +817,11 @@ describe("BlocksPage", () => {
     const el = open("/blocks");
     const row = (i: number) => text(el.querySelectorAll("tbody tr")[i] as Element);
     await until(() => expect(row(0)).toContain("1.09"));
-    expect(row(0)).toContain("0.00500000");
+    expect(row(0)).toContain("0.00 500 000");
     expect(row(1)).toContain("None");
     expect(el.querySelectorAll("tbody tr")[2]?.querySelector(".block-skel")).not.toBeNull();
     await vi.advanceTimersByTimeAsync(1300);
-    await until(() => expect(row(2)).toContain("0.00000007"));
+    await until(() => expect(row(2)).toContain("0.00 000 007"));
   });
 
   it("gives each audited block its match rate, and a dash to a block without one", async () => {
@@ -799,6 +848,37 @@ describe("BlocksPage", () => {
       expect(text(el.querySelectorAll("tbody tr")[1] as Element)).toContain("1.09"),
     );
     expect(cell(1)).toBe("–no audit");
+  });
+
+  it("marks the rows of blocks mined over Stratum V2, after the miner's name", async () => {
+    const rows = list(975_420);
+    const table: typeof replies = {
+      "/blocks": { body: rows },
+      "/blocks/975410": { body: [] },
+      "/blocks/tip/height": { body: "975420" },
+    };
+    const miner = { name: "MARA Pool", slug: "marapool" };
+    // The first is marked, the second says it is not, and the rest come from an older server.
+    for (const [i, b] of rows.entries()) {
+      const sv2 = i === 0 ? { sv2: true } : i === 1 ? { sv2: false } : {};
+      table[summaryPath(b.id)] = { body: [{ ...SUMMARY, id: b.id, miner, ...sv2 }] };
+    }
+    serve(table);
+    const el = open("/blocks");
+    const header = [...el.querySelectorAll("thead th")].map((th) => text(th));
+    const col = header.indexOf("Miner");
+    const cell = (i: number) => el.querySelectorAll("tbody tr")[i]?.querySelectorAll("td")[col];
+    await until(() => expect(text(cell(9) as Element)).toBe("MARA Pool"));
+    // Read aloud as its words; the short form is for the eye.
+    expect(text(cell(0) as Element)).toBe("MARA PoolSv2Stratum V2");
+    const mark = cell(0)?.querySelector(".block-sv2");
+    expect(mark?.querySelector('[aria-hidden="true"]')?.textContent).toBe("Sv2");
+    expect(mark?.querySelector(".visually-hidden")?.textContent).toBe("Stratum V2");
+    // Beside the pool's link, not in it, and not a control of its own: the row's tap opens the block.
+    expect(cell(0)?.querySelector("a")?.textContent).toBe("MARA Pool");
+    expect(cell(0)?.querySelector("button")).toBeNull();
+    expect(text(cell(1) as Element)).toBe("MARA Pool");
+    expect(el.querySelectorAll("tbody .block-sv2")).toHaveLength(1);
   });
 
   it("refuses a bad height", () => {

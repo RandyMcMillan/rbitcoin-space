@@ -72,7 +72,7 @@ Inside a migration: no `BEGIN` or `COMMIT` (it already runs in a transaction; th
 | `pool_list` | `0002_pools.sql` | One row: the version of the pool list and rules the `pool` column was last fully computed with | Yes: a missing or other version redoes the column |
 | [`audits`](#audits) | `0003_audits.sql` | One row per block we watched arrive: how it compared with the block we expected | **No:** observed live |
 | [`mempool_history`](#mempool_history) | `0004_mempool_history.sql`, `0012_split_lowest_band.sql` (the [split](#fee-bands)) | The mempool sampled once a minute, rolled into hours and days as it ages | No: observed live, lost with the file |
-| [`replacements`](#replacements) | `0005_replacements.sql`, `0008_replacement_blocks.sql` | The replacement record: what replaced what, as the mempool tracker saw it | No: observed live, lost with the file |
+| [`replacements`](#replacements) | `0005_replacements.sql`, `0008_replacement_blocks.sql`, `0021_replacement_outputs.sql` | The replacement record: what replaced what, as the mempool tracker saw it | No: observed live, lost with the file |
 | [`ln_channels`](#ln_channels) | `0006_lightning.sql`, `0007_lightning_lookups.sql` (`open_txid` and the lookup indexes), `0017_lightning_closes.sql` (a node's closes), `0019_lightning_penalties.sql` (the penalties list), `0020_lightning_blocks.sql` (a block's opens and closes) | Every public channel the Lightning peer verified, with its close | **No:** gossip forgets a channel once it closes |
 | [`ln_statistics`](#ln_statistics) | `0006_lightning.sql` | The Lightning network's totals every ten minutes, rolled into hours and days as they age | No: observed live |
 | [`ln_fees`, `ln_watched`](#ln_fees-and-ln_watched) | `0018_lightning_fees.sql` | Each open channel's newest 50 fee changes each way, and the stretches the server was recording them | No: observed live |
@@ -387,12 +387,20 @@ The replacement record ([`MEMPOOL.md`](MEMPOOL.md#following-a-transaction)), so 
 | `by_fee` … `by_rbf` | integer or `NULL` | The same for the replacement; all `NULL` when the tracker never held it (it was confirmed in the block that removed the original) |
 | `mined` | integer | Whether the replacement is confirmed: 0 not mined, 1 mined, 2 unknown (a reorg took its block away and where it is now is not known yet, [`MEMPOOL.md`](MEMPOOL.md#following-a-transaction)) |
 | `height`, `block` | integer, 32-byte blob, or `NULL` | The block that confirms it, when `mined` is 1. Rows written before migration 0008 have `mined` 1 and no block: they are left as they were, read as mined, and no reorg re-examines them |
+| `outputs`, `by_outputs` | blob or `NULL` | Each side's outputs as the tracker kept them ([`MEMPOOL.md`](MEMPOOL.md#outputs-kept-for-the-compare-view)): a byte saying which form, then the encoding, or the count when there were more than 32. `NULL` when not recorded: rows written before migration 0021, a replacement the tracker never held, a child that left with its parent, or past the tracker's budget. A blob that does not read back is treated as `NULL` |
+| `inputs`, `by_inputs`, `shared` | integer or `NULL` | Each side's input count, and how many inputs both spend (0: the replaced transaction left with its parent). `NULL` as above |
 
-**Writes.** One writer task per network takes the record's changes from a queue of 64, one entry per tracker delta or check of a reorg, with whatever else is queued, and writes them in one transaction in the order the record made them: `INSERT OR REPLACE` per new link (after deleting the replacement's own row, which no longer stands now that it is back), an indexed `UPDATE` of `mined`, `height` and `block` per replacement whose state changed (confirmed, or moved by a reorg), and for a transaction back in the mempool (or confirmed by a reorg itself) a `DELETE` of its own row and an `UPDATE` clearing `mined` on what it replaced; then `DELETE` of every row more than `REPLACEMENTS_KEPT` places behind the newest (a deleted row's place still counts, so the table may hold fewer, never more). All or nothing: a crash or an error leaves the rows as they were, and memory still has the links. The tracker and the task that follows it never wait for the store: a full queue drops the write and logs `replacements_store_failed`.
+**Writes.** One writer task per network takes the record's changes from a queue of 64, one entry per tracker delta or check of a reorg, with whatever else is queued, and writes them in one transaction in the order the record made them: `INSERT OR REPLACE` per new link (after deleting the replacement's own row, which no longer stands now that it is back), an `UPDATE` by `txid` of the outputs and input columns when the link has any, an indexed `UPDATE` of `mined`, `height` and `block` per replacement whose state changed (confirmed, or moved by a reorg), and for a transaction back in the mempool (or confirmed by a reorg itself) a `DELETE` of its own row and an `UPDATE` clearing `mined` on what it replaced; then `DELETE` of every row more than `REPLACEMENTS_KEPT` places behind the newest (a deleted row's place still counts, so the table may hold fewer, never more). All or nothing: a crash or an error leaves the rows as they were, and memory still has the links. The tracker and the task that follows it never wait for the store: a full queue drops the write and logs `replacements_store_failed`.
 
-**Reading.** `load(store, keep)` once, when the mempool engine starts: the newest `keep` rows, put back into the record oldest first. 10,000 rows took 3.6 ms (below). Requests never read the table; they read the record in memory.
+**Reading.** `load_kept(store, keep)` once, when the mempool engine starts: the newest `keep` rows with their outputs, put back into the record oldest first. 10,000 rows took 7 to 55 ms (below). Requests never read the table; they read the record in memory.
 
-**Size.** At most `REPLACEMENTS_KEPT` rows (10,000 by default). Measured with `cargo test --release -p engine -- --ignored --nocapture replacements_benchmark` (20,000 links written 20 at a time, so the bound had pruned half): 10,000 rows, 2.06 MB for the table and its two indexes, 205 bytes a row; reading them back took 3.6 ms.
+**Size.** At most `REPLACEMENTS_KEPT` rows (10,000 by default). Measured with `SIDES=none|wallet|worst cargo test --release -p engine --lib -- --ignored --nocapture replacements_benchmark` (20,000 links written 20 at a time, so the bound had pruned half), 2026-11-18:
+
+| Each link keeps | Table and indexes | A row | Read back | Outputs in memory |
+|---|---|---|---|---|
+| No outputs (as rows before 0021) | 2.14 MB | 214 bytes | 7 ms | none |
+| Two P2WPKH outputs a side, a payment's fee bump | 3.22 MB | 321 bytes | 11 ms | 1.0 MB, 104 bytes a link |
+| The most a side can keep, 32 outputs of 34-byte scripts | 42.0 MB | 4,198 bytes | 55 ms | 28.8 MB, 2,880 bytes a link |
 
 **Rebuildable:** no. The node does not keep replaced transactions; deleting the file forgets every replacement seen before.
 ### fee_samples and fee_blocks
@@ -463,7 +471,8 @@ So a reorg leaves the table as if the undone record had never arrived, and apply
 | `penalties(store, offset, limit)` | The breached rows, newest sweep first, and how many there are: through their partial index (`0019`), so it reads only them |
 | `channel(store, scid)` | One row, by its key |
 | `node_closed(store, node, offset, limit)` | A node's closed rows, newest close first, and how many it has: through the node indexes, so it reads that node's rows only (2.3 ms for ACINQ's 1,807) |
-| `node_closes(store, node)` | Every closed row of a node, newest close first, for its sorted and filtered list: through the closed rows' node indexes (`0017`), one per end, so it never reads the node's open rows |
+| `node_closes(store, node)` | Every closed row of a node, newest close first, for its sorted and filtered list: through the closed rows' node indexes (`0022`), one per end, so it never reads the node's open rows |
+| `node_close_rows(store, node, limit)` | A node's newest `limit` closes as its close record reads them (the other end, closing time, kind and fee), and whether it has more: at most `limit` + 1 entries of each closed-row node index, which hold each end's closes by height (`0022`, replacing `0017`'s single-column ones), so the work is bounded whatever the node's history. A row whose two ends are the node is read once |
 | `continued(store, closed)`, `lineage(store, channel)` | The channel each close funded between the same two nodes, and for one channel the one whose close funded it: an indexed lookup on the funding or closing txid each, the lowest id where several |
 | `node_spans(store, node)` | A node's rows' funding and closing times and capacity, for its history ([`LIGHTNING.md`](LIGHTNING.md#routes)) |
 | `by_txids(store, txids)` | The rows each txid funded or closed: two index lookups per txid |
@@ -471,7 +480,7 @@ So a reorg leaves the table as if the undone record had never arrived, and apply
 | `past(store)` | Every node's oldest funding time and closes by kind, every channel's funding time, and the oldest statistics row: two passes over the table for the graph's index, done again only after new rows were stored |
 | `unfunded(store, after, limit)`, `set_funding(store, found)` | The rows still without a funding txid, and storing them (`try_write`, and only while the row names the same block) |
 | `apply(store, changes)` | Stores records in order, in one write; fails with `Error::Full` rather than wait. `apply_from` also says of each record whether it wrote a row, which is what the overview's feed takes as news ([`LIGHTNING.md`](LIGHTNING.md#the-overview)) |
-| `overview::rows(store)` | Every row's nodes, capacity, funding and closing times and kind (a breach as penalty): one pass over the table, every ten minutes, for the overview's movers and closes by day |
+| `overview::rows(store)` | Every row's nodes, capacity, funding and closing times, kind (a breach as penalty) and closing fee: one pass over the table, every ten minutes, for the overview's movers, closes by day and the network's close record |
 
 ### ln_statistics
 

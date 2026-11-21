@@ -1,5 +1,5 @@
 // A checked transaction as the broadcast page and the decoder show it (docs/FRONTEND.md "Broadcast").
-import { createEffect, createSignal, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Amount, Sats } from "../../components/Amount";
 import { FeeRate } from "../../components/FeeRate";
@@ -14,6 +14,10 @@ import { useNetwork } from "../../lib/page";
 import { Flow, type Selection } from "../tx/Flow";
 import { Inspector } from "../tx/Inspector";
 import { isCoinbase, totalOut, vsize } from "../tx/tx";
+import { checkPrivacy } from "../../lib/privacy";
+import { UnsentPrivacy } from "../tx/Privacy";
+import { cardMarks, shownFindings } from "../tx/privacytext";
+import { markAttempted, wasAttempted } from "./attempted";
 import { broadcast, type Checked, needsSecondThought, rateOf, refusal, warnings } from "./push";
 import "../tx/TransactionPage.css";
 import "./Push.css";
@@ -22,7 +26,14 @@ import "./Push.css";
  * What a checked transaction does: summary, warnings, inputs and outputs, and with `enabled` the
  * broadcast button. The broadcast page and the decoder both draw it.
  */
-export function CheckedTx(props: { c: Checked; hex: string; enabled: boolean }) {
+export function CheckedTx(props: {
+  c: Checked;
+  hex: string;
+  enabled: boolean;
+  /** Where the page's own action goes when it has no button here (the decoder's link): after the
+   * notices, so a reader reaches what sending would show before the way to send it. */
+  action?: JSX.Element;
+}) {
   const network = useNetwork();
   const tx = () => props.c.tx;
   // The next block's rate, to tell a fee rate that is far too high. Absent with the engine off.
@@ -37,6 +48,19 @@ export function CheckedTx(props: { c: Checked; hex: string; enabled: boolean }) 
   const [sending, setSending] = createSignal(false);
   /** The txid the node accepted. */
   const [sent, setSent] = createSignal<string>();
+  // Pressed on this page at any time, in this view or one before it (attempted.ts): then it is
+  // never again said to be unsent. Read again for each transaction and after each press.
+  const [presses, setPresses] = createSignal(0);
+  const attempted = () => presses() >= 0 && wasAttempted(network(), tx().txid);
+  const state = () => (sent() === undefined ? (attempted() ? "attempted" : "unsent") : "sent");
+  // What sending it would show an observer: said while it can still change, so not for one the
+  // node already has, nor for a coinbase, which has no sender.
+  const privacy = createMemo(() => checkPrivacy(tx()));
+  const shown = () => !props.c.known && !privacy().coinbase;
+  // Sent from this page, it is what the transaction page shows: nothing for an unsent one.
+  const privacyMarks = createMemo(() =>
+    shown() ? cardMarks(shownFindings(privacy(), state() === "unsent")) : undefined,
+  );
   // Nothing can spend a transaction the node does not have; one it has may be spent already.
   const [spends] = createApi<Outspend[]>(() =>
     props.c.known ? `/tx/${tx().txid}/outspends` : false,
@@ -64,6 +88,8 @@ export function CheckedTx(props: { c: Checked; hex: string; enabled: boolean }) 
     controller = new AbortController();
     const signal = controller.signal;
     setSending(true);
+    markAttempted(network(), tx().txid);
+    setPresses((n) => n + 1);
     setWhy(undefined);
     broadcast(network(), props.hex, signal).then(
       (txid) => {
@@ -211,6 +237,14 @@ export function CheckedTx(props: { c: Checked; hex: string; enabled: boolean }) 
         </Notice>
       </Show>
 
+      <Show when={shown()}>
+        <UnsentPrivacy report={privacy()} state={state()} />
+      </Show>
+
+      <Show when={props.action}>
+        <div class="push-action">{props.action}</div>
+      </Show>
+
       <Show when={props.enabled && !props.c.known}>
         <div class="push-send" aria-live="polite">
           <Show
@@ -255,7 +289,13 @@ export function CheckedTx(props: { c: Checked; hex: string; enabled: boolean }) 
             {groupDigits(tx().vout.length)} output{tx().vout.length === 1 ? "" : "s"}
           </span>
         </SectionHeader>
-        <Flow tx={tx()} outspends={outspends} selected={selected()} onSelect={select} />
+        <Flow
+          tx={tx()}
+          outspends={outspends}
+          selected={selected()}
+          onSelect={select}
+          marks={privacyMarks()}
+        />
         <Show when={selected()} keyed>
           {(s) => (
             <Inspector

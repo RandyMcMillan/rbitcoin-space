@@ -1,5 +1,15 @@
 import { useSearchParams } from "@solidjs/router";
-import { createMemo, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  Match,
+  onCleanup,
+  Show,
+  Switch,
+  untrack,
+} from "solid-js";
 import type { JSX } from "@solidjs/web";
 import { Amount } from "../../components/Amount";
 import "../../components/Button.css";
@@ -15,6 +25,7 @@ import type { AddressStats, Transaction, Utxo } from "../../lib/esplora";
 import { groupDigits, MISSING } from "../../lib/format";
 import { NETWORK_NAMES, paths } from "../../lib/network";
 import { useNetwork } from "../../lib/page";
+import { steady } from "../../lib/steady";
 import {
   confirmations,
   isCoinbase,
@@ -26,6 +37,10 @@ import {
   sortUtxos,
   txFeeRate,
 } from "./address";
+import { handoverState } from "../../lib/lookalike";
+import type { Lookalike } from "./lookalike";
+import { LookalikeWarning } from "./LookalikeWarning";
+import { pinnedPath } from "./asof";
 import { Skeleton, settled, UnconfirmedMark } from "./parts";
 
 /** Confirmed transactions per page of address history; the first page adds the unconfirmed ones. */
@@ -51,13 +66,18 @@ const plural = (n: number, one: string, many: string) =>
  * the URL (`?view=unspent`), so a link or a reload opens the same one. Loaded pages survive a
  * switch between views.
  */
-/** The pages after the first, whether the last of them was full, and which rows are new. */
+/**
+ * The pages after the first, whether the last of them was full, whether one has answered since
+ * the first page last changed (an empty answer adds no rows, and still says there are no more),
+ * and which rows are new.
+ */
 interface Later {
   txs: Transaction[];
   full: boolean;
+  answered: boolean;
   fresh: ReadonlySet<string>;
 }
-const NOTHING_LATER: Later = { txs: [], full: true, fresh: new Set() };
+const NOTHING_LATER: Later = { txs: [], full: true, answered: false, fresh: new Set() };
 
 export function History(props: {
   address: string;
@@ -75,6 +95,21 @@ export function History(props: {
    * listed apart.
    */
   kept?: boolean;
+  /** Lookalike addresses by txid, worked out by the page from what this section reports loaded. */
+  lookalike: ReadonlyMap<string, readonly Lookalike[]>;
+  /**
+   * The block the page shows the address as of: `first` is its newest confirmed page from
+   * `/txs/chain?asof=`, later pages and the unspent outputs are pinned to the same hash, and an
+   * output's confirmations are counted at that block.
+   */
+  asof?: { hash: string; height: number };
+  /** Told when a pinned read finds its block no longer on the best chain (a 404). */
+  onGone?: () => void;
+  /**
+   * Hands the page every transaction loaded, first page and later ones, and whether more could be
+   * loaded, whenever either changes; and nothing once this section is gone.
+   */
+  onShown: (txs: Transaction[] | undefined, more: boolean) => void;
 }) {
   const network = useNetwork();
   const path = `/address/${encodeURIComponent(props.address)}`;
@@ -113,10 +148,11 @@ export function History(props: {
   onCleanup(() => controller.abort());
 
   const first = () => settled(props.first);
+  const pin = (p: string) => (props.asof === undefined ? p : pinnedPath(p, props.asof.hash));
   const total = () => {
     const s = settled(props.stats);
     if (!s) return undefined;
-    return props.kept === true
+    return props.kept === true || props.asof !== undefined
       ? s.chain_stats.tx_count
       : s.chain_stats.tx_count + s.mempool_stats.tx_count;
   };
@@ -148,6 +184,8 @@ export function History(props: {
     const next: Later = {
       txs: old ? keptAfterRefresh(f, mergePages(old, prev.txs), PAGE) : prev.txs,
       full: old && prev.txs.length === 0 ? pageIsFull(old, PAGE) : prev.full,
+      // A changed first page may have more after it again.
+      answered: false,
       fresh: new Set(old ? [...ids].filter((id) => !known.has(id)) : []),
     };
     known = new Set([...known, ...ids]);
@@ -156,11 +194,28 @@ export function History(props: {
   });
   const later = () => after().txs;
   const fresh = () => after().fresh;
+  // The object already held for a transaction whose answer has not changed, so the table, which
+  // keeps a row's elements while it is given the same object, rebuilds no row but those that
+  // changed: the reader keeps their focus, the row under their finger and a note they were sent
+  // to. Compared whole, so a field a later answer changed (a block, a pruned input) is never
+  // hidden behind the old object.
+  const steadyTxs = steady<Transaction>((t) => t.txid);
   const shown = createMemo(() => {
     const f = first();
-    return f ? mergePages(f, later()) : undefined;
+    return f ? steadyTxs(mergePages(f, later())) : undefined;
   });
-  const hasNext = () => (later().length === 0 ? pageIsFull(first() ?? [], PAGE) : after().full);
+  // The page works out the lookalikes over every loaded page at once (its notice and these rows read
+  // the one answer), so a later page's lookalike also marks the earlier rows it imitates.
+  const hasNext = () =>
+    later().length === 0 && !after().answered ? pageIsFull(first() ?? [], PAGE) : after().full;
+  createEffect(
+    () => [shown(), hasNext()] as const,
+    ([list, more]) => {
+      props.onShown(list, more);
+    },
+  );
+  // A notice must not outlive the rows it points at (a kept history the server dropped, say).
+  onCleanup(() => props.onShown(undefined, false));
 
   const loadMore = async () => {
     if (!shown()?.at(-1) || loadingMore()) return;
@@ -173,22 +228,30 @@ export function History(props: {
         // oxlint-disable-next-line no-await-in-loop -- one page at a time, after the last row shown
         const page = await fetchApi<Transaction[]>(
           network(),
-          props.kept === true
-            ? `${path}/txs/chain/${encodeURIComponent(last.txid)}`
+          props.kept === true || props.asof !== undefined
+            ? pin(`${path}/txs/chain/${encodeURIComponent(last.txid)}`)
             : `${path}/txs?after_txid=${encodeURIComponent(last.txid)}`,
-          { signal: controller.signal },
+          // Past the browser's cache: an empty answer says the history has no more, so one kept
+          // from before a reorg must not say it for the chain that followed.
+          { signal: controller.signal, fresh: true },
         );
         // A refresh while this was in flight may have changed the history it continues (new
         // transactions, a reorg), so the reply could leave a gap or bring back stale rows: it is
         // dropped, and the next page is asked for after the rows the refresh left.
         if (generation === asked) {
-          setAfter((a) => ({ ...a, txs: [...a.txs, ...page], full: pageIsFull(page, PAGE) }));
+          setAfter((a) => ({
+            ...a,
+            txs: [...a.txs, ...page],
+            full: pageIsFull(page, PAGE),
+            answered: true,
+          }));
           break;
         }
       }
       setLoadingMore(false);
     } catch (e) {
       if (controller.signal.aborted) return;
+      if (props.asof !== undefined && refusal(e) === "gone") props.onGone?.();
       setMoreError(e);
       setLoadingMore(false);
     }
@@ -202,16 +265,27 @@ export function History(props: {
   const opened = createMemo((was?: boolean) => was === true || view() === "unspent");
   const statsKnown = () => props.stats.state !== "unresolved" && props.stats.state !== "pending";
   const wantUtxos = () =>
-    props.held !== true && opened() && statsKnown() && statsFailure() !== "too-large";
+    props.held !== true &&
+    opened() &&
+    statsKnown() &&
+    statsFailure() !== "too-large" &&
+    statsFailure() !== "not-kept";
   const [utxos, { refetch: refetchUtxos }] = createApi<Utxo[]>(
-    () => wantUtxos() && `${path}/utxo`,
+    () => wantUtxos() && pin(`${path}/utxo`),
     {
       fresh: true,
     },
   );
+  // As of a block, confirmations are counted at it: the tip is not asked.
   const [tip, { refetch: refetchTip }] = createApi<string>(
-    () => wantUtxos() && "/blocks/tip/height",
+    () => wantUtxos() && props.asof === undefined && "/blocks/tip/height",
     { as: "text", fresh: true },
+  );
+  createEffect(
+    () => utxos.state === "errored" && refusal(utxos.error) === "gone",
+    (gone) => {
+      if (gone && props.asof !== undefined) props.onGone?.();
+    },
   );
   // A request still in flight is asked again, so its answer is as new as the change.
   const asked = (state: string) =>
@@ -281,11 +355,14 @@ export function History(props: {
                 statsFailure() === "too-large" ||
                 (props.first.state === "errored" && refusal(props.first.error) === "too-large")
               }
+              notKept={props.first.state === "errored" && refusal(props.first.error) === "not-kept"}
+              at={props.asof?.height}
               first={props.first}
               retryFirst={props.retryFirst}
               shown={shown()}
               total={total()}
               rowClass={(tx) => (tx && fresh().has(tx.txid) ? "address-row--new" : undefined)}
+              lookalike={props.lookalike}
               more={
                 <Show when={shown()}>
                   <div class="address-more">
@@ -315,6 +392,12 @@ export function History(props: {
           }
         >
           <Switch>
+            <Match when={statsFailure() === "not-kept"}>
+              <Empty title="Unspent outputs are not available for this address">
+                The server keeps only running totals for an address with this much history, not its
+                coins.
+              </Empty>
+            </Match>
             <Match when={statsFailure() === "too-large"}>
               <Empty title="Unspent outputs are not available for this address">
                 The node refuses to list them for the same reason it refuses the totals: the address
@@ -325,6 +408,7 @@ export function History(props: {
               <Unspent
                 utxos={utxos}
                 tip={tip}
+                at={props.asof?.height}
                 retry={() => {
                   if (utxos.state === "errored") refetchUtxos();
                   if (tip.state === "errored") refetchTip();
@@ -352,14 +436,25 @@ function When(props: { tx: Transaction }) {
 function Transactions(props: {
   address: string;
   tooLarge: boolean;
+  /** As of a block the server keeps no history for, for an address this large. */
+  notKept: boolean;
+  /** The height the page is as of. */
+  at: number | undefined;
   first: ApiResource<Transaction[]>;
   retryFirst: () => void;
   shown: Transaction[] | undefined;
   total: number | undefined;
   rowClass: (tx: Transaction | null) => string | undefined;
+  /** Lookalike addresses by txid (lookalike.ts); a row in it carries a warning. */
+  lookalike: ReadonlyMap<string, readonly Lookalike[]>;
   more: JSX.Element;
 }) {
   const network = useNetwork();
+  // A row that names a lookalike hands its findings to the transaction page in history state.
+  const handover = (tx: Transaction | null) => {
+    const found = tx && props.lookalike.get(tx.txid);
+    return found ? handoverState(props.address, found, tx.txid, network()) : undefined;
+  };
   const columns: Column<Transaction | null>[] = [
     {
       header: "Time",
@@ -371,7 +466,13 @@ function Transactions(props: {
       cell: (tx) =>
         tx ? (
           <span class="address-txcell">
-            <Hash value={tx.txid} href={paths.tx(tx.txid)} copyLabel="Copy transaction ID" fit />
+            <Hash
+              value={tx.txid}
+              href={paths.tx(tx.txid)}
+              linkState={handover(tx)}
+              copyLabel="Copy transaction ID"
+              fit
+            />
             {/* Phones drop the time column, so the time moves under the txid. */}
             <span class="address-txcell__when">
               <When tx={tx} />
@@ -416,12 +517,24 @@ function Transactions(props: {
           has too much history.
         </Empty>
       </Match>
+      <Match when={props.notKept}>
+        <Empty title="Transactions at this block are not kept for this address">
+          For an address with this much history, the server keeps transactions as of a past block
+          only for its last 100 blocks.
+        </Empty>
+      </Match>
       <Match when={props.first.state === "errored"}>
         <ErrorState
           title="Could not load this address's transactions"
           error={props.first.error}
           retry={props.retryFirst}
         />
+      </Match>
+      <Match when={props.shown?.length === 0 && props.at !== undefined}>
+        <Empty title={`No transactions by block ${groupDigits(props.at ?? 0)}`}>
+          No transaction paying or spending this address had confirmed by block{" "}
+          {groupDigits(props.at ?? 0)}.
+        </Empty>
       </Match>
       <Match when={props.shown?.length === 0}>
         <Empty title="This address has never been used">
@@ -432,11 +545,25 @@ function Transactions(props: {
       <Match when={true}>
         <div class="address-txs" aria-busy={props.shown === undefined ? "true" : "false"}>
           <DataTable
-            caption="Transactions of this address, newest first"
+            caption={
+              props.at === undefined
+                ? "Transactions of this address, newest first"
+                : `Transactions of this address up to block ${groupDigits(props.at)}, newest first`
+            }
             columns={columns}
             rows={props.shown ?? placeholders(props.total)}
             rowHref={(t) => (t ? paths.tx(t.txid) : undefined)}
+            rowState={handover}
             rowClass={props.rowClass}
+            rowNote={{
+              when: (t) => t !== null && props.lookalike.has(t.txid),
+              render: (t) => (
+                <LookalikeWarning
+                  txid={t?.txid ?? ""}
+                  found={(t && props.lookalike.get(t.txid)) ?? []}
+                />
+              ),
+            }}
           />
           <Show when={props.shown === undefined}>
             <span class="visually-hidden" role="status">
@@ -472,13 +599,18 @@ function Unspent(props: {
   utxos: ApiResource<Utxo[]>;
   tip: ApiResource<string>;
   retry: () => void;
+  /** The height the page is as of: confirmations are counted at it. */
+  at?: number | undefined;
 }) {
   const [page, setPage] = createSignal(1);
+  // As for the transactions: an output the answer still lists, unchanged, keeps its row.
+  const steadyUtxos = steady<Utxo>((u) => `${u.txid}:${u.vout}`);
   const sorted = createMemo(() => {
     const u = settled(props.utxos);
-    return u ? sortUtxos(u) : undefined;
+    return u ? sortUtxos(steadyUtxos(u)) : undefined;
   });
   const tipHeight = () => {
+    if (props.at !== undefined) return props.at;
     const t = Number(settled(props.tip));
     return Number.isSafeInteger(t) ? t : undefined;
   };
@@ -507,7 +639,9 @@ function Unspent(props: {
       cell: (u) => (u ? <Amount sats={u.value} unit={false} /> : <Skeleton width="10ch" />),
     },
     {
-      header: "Confirmations",
+      // As of a block, counted at that block. Fixed for the section's life: the page is made
+      // afresh for each block.
+      header: untrack(() => props.at) === undefined ? "Confirmations" : "Confirmations then",
       numeric: true,
       optional: true,
       cell: (u) => (u ? <Confirmations utxo={u} tip={tipHeight()} /> : <Skeleton width="4ch" />),
@@ -519,7 +653,7 @@ function Unspent(props: {
   const failed = (): unknown =>
     props.utxos.state === "errored"
       ? props.utxos.error
-      : props.tip.state === "errored"
+      : props.at === undefined && props.tip.state === "errored"
         ? props.tip.error
         : undefined;
 
@@ -533,15 +667,28 @@ function Unspent(props: {
         />
       </Match>
       <Match when={sorted()?.length === 0}>
-        <Empty title="No unspent outputs">
-          This address holds no coins: everything paid to it has been spent, or nothing has been
-          paid to it yet.
-        </Empty>
+        <Show
+          when={props.at === undefined}
+          fallback={
+            <Empty title="No unspent outputs at this block">
+              Everything paid to this address by then had already been spent.
+            </Empty>
+          }
+        >
+          <Empty title="No unspent outputs">
+            This address holds no coins: everything paid to it has been spent, or nothing has been
+            paid to it yet.
+          </Empty>
+        </Show>
       </Match>
       <Match when={true}>
         <div class="address-utxos" aria-busy={sorted() === undefined ? "true" : "false"}>
           <DataTable
-            caption="Unspent outputs of this address, newest first"
+            caption={
+              props.at === undefined
+                ? "Unspent outputs of this address, newest first"
+                : `Unspent outputs of this address at block ${groupDigits(props.at)}, newest first`
+            }
             columns={columns}
             rows={
               sorted()?.slice((current() - 1) * UTXO_STEP, current() * UTXO_STEP) ??
